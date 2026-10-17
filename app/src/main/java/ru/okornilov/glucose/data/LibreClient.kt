@@ -13,6 +13,9 @@ import java.util.Locale
 
 class LibreException(message: String) : Exception(message)
 
+/** Ответ LibreView: текущий замер, история за 12 часов и момент запуска сенсора (epoch millis), если известен. */
+data class Fetched(val current: Reading?, val history: List<Reading>, val sensorStart: Long?)
+
 /** Клиент неофициального API LibreLinkUp (облако LibreView). Блокирующий — вызывать с Dispatchers.IO. */
 class LibreClient(
     private val email: String,
@@ -28,7 +31,7 @@ class LibreClient(
     private var loginRetryAt = 0L
 
     @Synchronized
-    fun fetch(): Pair<Reading?, List<Reading>> {
+    fun fetch(): Fetched {
         val pid = patientId ?: run {
             val connections = get("/llu/connections") as JSONArray
             if (connections.length() == 0) {
@@ -37,10 +40,13 @@ class LibreClient(
             connections.getJSONObject(0).getString("patientId").also { patientId = it }
         }
         val data = get("/llu/connections/$pid/graph") as JSONObject
-        val current = parse(data.optJSONObject("connection")?.optJSONObject("glucoseMeasurement"))
+        val connection = data.optJSONObject("connection")
+        val current = parse(connection?.optJSONObject("glucoseMeasurement"))
         val graph = data.optJSONArray("graphData") ?: JSONArray()
         val history = (0 until graph.length()).mapNotNull { parse(graph.optJSONObject(it)) }
-        return current to history
+        // sensor.a — время запуска сенсора, секунды
+        val sensorStart = connection?.optJSONObject("sensor")?.optLong("a", 0L)?.takeIf { it > 0 }?.times(1000)
+        return Fetched(current, history, sensorStart)
     }
 
     private fun login() {

@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import ru.okornilov.glucose.alerts.AlertEngine
 import ru.okornilov.glucose.alerts.Notifications
+import ru.okornilov.glucose.alerts.Reminders
 import ru.okornilov.glucose.data.Prefs
 import ru.okornilov.glucose.data.ReadingsDb
 import ru.okornilov.glucose.data.Repository
@@ -18,13 +19,19 @@ class App : Application() {
         private set
     lateinit var repo: Repository
         private set
+    lateinit var reminders: Reminders
+        private set
 
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
         db = ReadingsDb(this)
         alerts = AlertEngine(this, prefs)
-        repo = Repository(prefs, db, alerts) { GlucoseWidget.updateAll(this) }
+        reminders = Reminders(this)
+        repo = Repository(prefs, db, alerts) {
+            GlucoseWidget.updateAll(this)
+            if (prefs.monitoring) reminders.check()
+        }
         Notifications.syncChannels(this)
     }
 }

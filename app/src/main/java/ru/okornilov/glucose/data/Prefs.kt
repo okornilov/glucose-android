@@ -28,6 +28,27 @@ class Prefs(context: Context) {
         }
 
     var muteUntil by sp.longPref("mute_until", 0L, bump)
+
+    /** Когда запущен текущий сенсор (epoch millis), 0 — неизвестно. Обновляется при каждом опросе. */
+    var sensorStart by sp.longPref("sensor_start", 0L)
+
+    /** Срок службы сенсора, дней: 14 у Libre 2/3, 15 у моделей Plus. */
+    var sensorDays by sp.intPref("sensor_days", 14, bump)
+
+    /** Напоминать о замене сенсора за сутки и за 2 часа. */
+    var notifySensor by sp.boolPref("notify_sensor", true, bump)
+
+    /** Утренняя сводка за ночь — включается в настройках. */
+    var summaryEnabled by sp.boolPref("summary_enabled", false, bump)
+
+    /** Время утренней сводки, минуты от полуночи; ночь — с 23:00 до этого времени. */
+    var summaryMinute by sp.intPref("summary_minute", 7 * 60, bump)
+
+    /** Постоянное уведомление со значением сахара; выключено — тихое «мониторинг работает» без значка. */
+    var showOngoing by sp.boolPref("show_ongoing", true, bump)
+
+    /** Live Update (Android 16+): сахар в «капсуле» строки состояния и на экране блокировки. */
+    var liveUpdate by sp.boolPref("live_update", true, bump)
     var monitoring by sp.boolPref("monitoring", false, bump)
 
     /** Непрозрачность фона виджета, %: 0 — полностью прозрачный. */
@@ -46,11 +67,17 @@ class Prefs(context: Context) {
     fun profiles(): List<Profile> {
         cache?.let { return it }
         val raw = sp.getString("profiles", null)
-        val list = if (raw.isNullOrEmpty()) {
+        var list = if (raw.isNullOrEmpty()) {
             listOf(legacyProfile()).also { write(it) }
         } else {
             val array = JSONArray(raw)
             (0 until array.length()).map { Profile.fromJson(array.getJSONObject(it)) }
+        }
+        // Прогноз сначала был включён по умолчанию; его никто не включал сам — один раз выключаем во всех профилях
+        if (!sp.getBoolean(PREDICT_OFF_MIGRATED, false)) {
+            list = list.map { it.copy(notifyPredictLow = false) }
+            write(list)
+            sp.edit().putBoolean(PREDICT_OFF_MIGRATED, true).apply()
         }
         cache = list
         return list
@@ -92,6 +119,10 @@ class Prefs(context: Context) {
     val notifyRecovery: Boolean get() = active.notifyRecovery
     val repeatMinutes: Int get() = active.repeatMinutes
     val staleMinutes: Int get() = active.staleMinutes
+    val notifyPredictLow: Boolean get() = active.notifyPredictLow
+    val predictMinutes: Int get() = active.predictMinutes
+    val lowRepeatMinutes: Int get() = active.lowRepeatMinutes
+    val lowEscalate: Boolean get() = active.lowEscalate
 
     private fun write(list: List<Profile>) {
         cache = list
@@ -115,6 +146,7 @@ class Prefs(context: Context) {
     }
 
     companion object {
+        private const val PREDICT_OFF_MIGRATED = "predict_off_migrated"
         const val STALE_REPEAT_MINUTES = 60
         private val LEGACY_TYPES = listOf("low", "high", "stale", "recovery", "resumed")
     }

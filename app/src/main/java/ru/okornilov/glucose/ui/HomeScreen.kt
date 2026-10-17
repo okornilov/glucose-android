@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -47,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -61,6 +63,8 @@ import kotlinx.coroutines.withContext
 import ru.okornilov.glucose.app
 import ru.okornilov.glucose.data.Freshness
 import ru.okornilov.glucose.data.Reading
+import ru.okornilov.glucose.data.Zone
+import ru.okornilov.glucose.data.zoneOf
 import ru.okornilov.glucose.data.freshness
 import ru.okornilov.glucose.data.ago
 import ru.okornilov.glucose.data.fmt
@@ -74,7 +78,7 @@ import java.time.format.DateTimeFormatter
 private val DAY_FORMAT = DateTimeFormatter.ofPattern("d MMMM yyyy")
 
 @Composable
-fun HomeScreen(onOpenSettings: () -> Unit) {
+fun HomeScreen(onOpenSettings: () -> Unit, onOpenReport: () -> Unit) {
     val ctx = LocalContext.current
     val app = ctx.app
     val last by app.repo.last.collectAsStateWithLifecycle()
@@ -132,6 +136,8 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         ) {
             // Верхняя строка: профили слева (прокручиваются), действия справа
             val profiles = app.prefs.profiles()
+            // Значки действий приглушённые, чтобы не спорить с текущим сахаром
+            val iconTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 // Профиль — выпадающим списком, чтобы строка помещалась при любом числе профилей
                 Box(Modifier.weight(1f)) {
@@ -168,7 +174,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                         )
                     }
                 }
-                IconButton(onClick = share) { Icon(Icons.Default.Share, contentDescription = "Поделиться") }
+                IconButton(onClick = share) { Icon(Icons.Default.Share, contentDescription = "Поделиться", tint = iconTint) }
                 IconButton(
                     onClick = {
                         scope.launch {
@@ -182,12 +188,12 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                     if (refreshing) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     } else {
-                        Icon(Icons.Default.Refresh, contentDescription = "Обновить")
+                        Icon(Icons.Default.Refresh, contentDescription = "Обновить", tint = iconTint)
                     }
                 }
                 Box {
                     var menu by remember { mutableStateOf(false) }
-                    IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Меню") }
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Меню", tint = iconTint) }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(
                             text = { Text("Поделиться") },
@@ -195,6 +201,14 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                             onClick = {
                                 menu = false
                                 share()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Отчёт за период") },
+                            leadingIcon = { Icon(Icons.Default.DateRange, contentDescription = null) },
+                            onClick = {
+                                menu = false
+                                onOpenReport()
                             },
                         )
                         DropdownMenuItem(
@@ -227,6 +241,8 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
             )
 
             DayStats(readings, low, high)
+
+            ExtraInfo(app.db, dataVersion, now, low, high, app.prefs.predictMinutes, app.prefs.sensorStart, app.prefs.sensorDays)
         }
     }
 }
@@ -247,15 +263,24 @@ private fun CurrentCard(last: Reading?, error: String?, now: Long, low: Double, 
         if (!prefs.monitoring) add("Фоновый мониторинг выключен — уведомлений не будет")
         if (prefs.muted(now)) add("🔕 Тишина до ${hhmm(prefs.muteUntil)}")
     }
-    // Фон и рамка — только когда есть о чём предупредить; в обычном состоянии блок прозрачный
+    // Фон по текущему значению: светло-красный, светло-зелёный или светло-жёлтый.
+    // Устаревшее значение — прежнее выделение ошибкой, чтобы не путать с текущим уровнем.
+    val tint = last?.let { zoneTint(it.mmol, low, high) }
+    // Рамка и цифры одного цвета зоны: в тёмной теме яркий, в светлой — насыщенный (яркий там не читается)
+    val dark = colors.background.luminance() < 0.5f
+    val zoneBorder = last?.let { zoneStrong(it.mmol, low, high, dark) }
     val container = when {
         stale -> colors.errorContainer.copy(alpha = 0.25f)
-        last == null || notes.isNotEmpty() -> CardDefaults.cardColors().containerColor
-        else -> Color.Transparent
+        tint != null -> tint.copy(alpha = 0.09f)
+        else -> CardDefaults.cardColors().containerColor
     }
     Card(
         Modifier.fillMaxWidth(),
-        border = if (stale) BorderStroke(2.dp, colors.error) else null,
+        border = when {
+            stale -> BorderStroke(2.dp, colors.error)
+            zoneBorder != null -> BorderStroke(1.dp, zoneBorder)
+            else -> BorderStroke(1.dp, colors.outlineVariant)
+        },
         colors = CardDefaults.cardColors(containerColor = container),
     ) {
         if (stale) {
@@ -274,14 +299,15 @@ private fun CurrentCard(last: Reading?, error: String?, now: Long, low: Double, 
             if (last == null) {
                 Text("Нет данных", Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
             } else {
-                val level = levelColor(last.mmol, low, high)
-                val color = if (stale) level.copy(alpha = 0.45f) else level
-                Text(last.mmol.fmt(), fontSize = 64.sp, fontWeight = FontWeight.Bold, color = color)
-                Text(" ${last.arrow}", fontSize = 44.sp, color = color)
+                // Цифры цветом рамки блока; устаревшее значение — приглушённое
+                val zone = zoneBorder ?: colors.onSurface
+                val fill = if (stale) zone.copy(alpha = 0.5f) else zone
+                Text(last.mmol.fmt(), fontSize = 64.sp, fontWeight = FontWeight.Black, color = fill)
+                Text(" ${last.arrow}", fontSize = 44.sp, fontWeight = FontWeight.Bold, color = fill)
                 Spacer(Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.End) {
                     Text("ммоль/л", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
-                    Text(hhmm(last.ts), style = MaterialTheme.typography.titleMedium, color = if (stale) colors.error else Color.Unspecified)
+                    Text(hhmm(last.ts), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = if (stale) colors.error else Color.Unspecified)
                     Text(ago(last.ts, now), style = MaterialTheme.typography.labelSmall, color = if (stale) colors.error else colors.onSurfaceVariant)
                 }
             }
@@ -295,4 +321,18 @@ private fun CurrentCard(last: Reading?, error: String?, now: Long, low: Double, 
             )
         }
     }
+}
+
+/** Цвет фона карточки по зоне: красный — низкий, зелёный — в норме, жёлтый — высокий. */
+private fun zoneTint(mmol: Double, low: Double, high: Double): Color = when (zoneOf(mmol, low, high)) {
+    Zone.LOW -> Color(0xFFEF5350)
+    Zone.IN_RANGE -> Color(0xFF66BB6A)
+    Zone.HIGH -> Color(0xFFFFEE58)
+}
+
+/** Цвет рамки и цифр по зоне: красный — низкий, зелёный — в норме, жёлтый — высокий. */
+private fun zoneStrong(mmol: Double, low: Double, high: Double, dark: Boolean): Color = when (zoneOf(mmol, low, high)) {
+    Zone.LOW -> if (dark) Color(0xFFFF1744) else Color(0xFFD32F2F)
+    Zone.IN_RANGE -> if (dark) Color(0xFF00E676) else Color(0xFF2E7D32)
+    Zone.HIGH -> if (dark) Color(0xFFFFEA00) else Color(0xFFE6A100)
 }

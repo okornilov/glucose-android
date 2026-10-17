@@ -16,6 +16,7 @@ import android.graphics.drawable.Icon
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import ru.okornilov.glucose.R
 import ru.okornilov.glucose.app
@@ -31,12 +32,18 @@ import ru.okornilov.glucose.ui.MainActivity
 
 object Notifications {
     private const val CH_MONITOR = "monitor"
+    const val CH_MONITOR_QUIET = "monitor_quiet"
+    private const val CH_SENSOR = "sensor"
+    private const val CH_SUMMARY = "summary"
 
     const val ID_ONGOING = 1
     private const val ID_LEVEL = 10
     private const val ID_STALE = 11
     private const val ID_RECOVERY = 12
     private const val ID_RESUMED = 13
+    private const val ID_PREDICT = 14
+    private const val ID_SENSOR = 15
+    private const val ID_SUMMARY = 16
 
     /** Канал типа уведомления в активном профиле. */
     fun channelId(ctx: Context, type: AlertType): String = channelId(ctx.app.prefs.active, type)
@@ -55,6 +62,14 @@ object Notifications {
         nm.createNotificationChannelGroups(profiles.map { NotificationChannelGroup(it.id, "Профиль «${it.name}»") })
         val channels = listOf(
             NotificationChannel(CH_MONITOR, "Текущее значение", NotificationManager.IMPORTANCE_LOW).apply {
+                setShowBadge(false)
+            },
+            // Минимальная важность: без значка в строке состояния, свёрнуто внизу шторки
+            NotificationChannel(CH_MONITOR_QUIET, "Фоновая работа", NotificationManager.IMPORTANCE_MIN).apply {
+                setShowBadge(false)
+            },
+            NotificationChannel(CH_SENSOR, "Замена сенсора", NotificationManager.IMPORTANCE_DEFAULT),
+            NotificationChannel(CH_SUMMARY, "Утренняя сводка", NotificationManager.IMPORTANCE_DEFAULT).apply {
                 setShowBadge(false)
             },
         ) + profiles.flatMap { p -> AlertType.entries.map { buildChannel(p, it, copyFrom = null) } }
@@ -128,10 +143,37 @@ object Notifications {
         }
     }
 
+    /**
+     * Live Update (Android 16+): система показывает уведомление «капсулой» с текстом chip у часов
+     * в строке состояния и выше остальных на экране блокировки. Методы появились в API 36,
+     * а проект собирается под 35 — вызываем через reflection; на старых версиях ничего не делаем.
+     */
+    private fun promote(b: Notification.Builder, chip: String) {
+        if (Build.VERSION.SDK_INT < 36) return
+        try {
+            Notification.Builder::class.java.getMethod("setRequestPromotedOngoing", Boolean::class.javaPrimitiveType).invoke(b, true)
+            Notification.Builder::class.java.getMethod("setShortCriticalText", String::class.java).invoke(b, chip)
+        } catch (e: ReflectiveOperationException) {
+            Log.w("Notifications", "Live Update недоступен: $e")
+        }
+    }
+
     /** Постоянное уведомление фонового сервиса; в строке состояния — само значение вместо иконки. */
     fun ongoing(ctx: Context, last: Reading?, error: String?): Notification {
+        // Служба переднего плана обязана показывать уведомление — если сахар в нём не нужен, оно тихое и минимальное
+        if (!ctx.app.prefs.showOngoing) {
+            return Notification.Builder(ctx, CH_MONITOR_QUIET)
+                .setOngoing(true)
+                .setShowWhen(false)
+                .setSmallIcon(R.drawable.ic_stat)
+                .setContentTitle("Мониторинг сахара работает")
+                .setContentIntent(openApp(ctx))
+                .build()
+        }
         val b = Notification.Builder(ctx, CH_MONITOR)
             .setOngoing(true)
+            // Сахар виден на экране блокировки целиком, без «скрытого содержимого»
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
             .setContentIntent(openApp(ctx))
@@ -152,6 +194,7 @@ object Notifications {
                 .setContentTitle("Нет данных")
                 .setContentText(error ?: "Ожидание данных LibreView · профиль «${profile.name}»")
         }
+        if (last != null && prefs.liveUpdate) promote(b, "${last.mmol.fmt()}${last.arrow}")
         // Быстрое переключение: кнопки остальных профилей (в уведомлении помещается три)
         prefs.profiles().filter { it.id != profile.id }.take(3).forEachIndexed { i, p ->
             b.addAction(
@@ -163,19 +206,58 @@ object Notifications {
         return b.build()
     }
 
-    fun level(ctx: Context, low: Boolean, r: Reading) {
+    /**
+     * repeat — номер повтора без реакции (0 — первое уведомление). escalate — дополнительно громкий сигнал
+     * через [AlarmPlayer]; звук канала тогда не повторяем, чтобы не звучало два сигнала сразу.
+     */
+    fun level(ctx: Context, low: Boolean, r: Reading, repeat: Int = 0, escalate: Boolean = false) {
         val n = Notification.Builder(ctx, channelId(ctx, if (low) AlertType.LOW else AlertType.HIGH))
             .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle(if (low) "🔴 Низкий сахар" else "🟠 Высокий сахар")
+            .setContentTitle(
+                (if (low) "🔴 Низкий сахар" else "🟠 Высокий сахар") + if (repeat > 0) " · повтор $repeat" else ""
+            )
             .setContentText(describe(r))
             .setCategory(Notification.CATEGORY_ALARM)
             .setContentIntent(openApp(ctx))
+            .setDeleteIntent(stopSoundIntent(ctx))
+            .setOnlyAlertOnce(escalate)
             .setAutoCancel(true)
             .addAction(alertAction(ctx, AlertEngine.KIND_LEVEL, 30))
             .addAction(alertAction(ctx, AlertEngine.KIND_LEVEL, 60))
             .addAction(alertAction(ctx, AlertEngine.KIND_LEVEL, 0))
             .build()
         notify(ctx, ID_LEVEL, n)
+        if (escalate) {
+            val profile = ctx.app.prefs.active
+            AlarmPlayer.start(ctx, soundUri(profile, AlertType.LOW), vibration(profile, AlertType.LOW) != Vibration.OFF)
+        }
+    }
+
+    /** Сахар ещё не низкий, но по прогнозу скоро станет. */
+    fun predictLow(ctx: Context, r: Reading, minutesToLow: Int?, predicted: Double, horizonMinutes: Int) {
+        val title = if (minutesToLow != null) "📉 Скоро низкий сахар · ~$minutesToLow мин" else "📉 Скоро низкий сахар"
+        val text = "Сейчас ${r.mmol.fmt()} ${r.arrow}, через $horizonMinutes мин ≈ ${predicted.coerceAtLeast(1.0).fmt()} ммоль/л"
+        val n = Notification.Builder(ctx, channelId(ctx, AlertType.PREDICT_LOW))
+            .setSmallIcon(R.drawable.ic_stat)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setCategory(Notification.CATEGORY_ALARM)
+            .setContentIntent(openApp(ctx))
+            .setAutoCancel(true)
+            .addAction(alertAction(ctx, AlertEngine.KIND_PREDICT, 0))
+            .addAction(
+                Notification.Action.Builder(
+                    Icon.createWithResource(ctx, R.drawable.ic_stat),
+                    "🔕 Выключить прогнозы",
+                    PendingIntent.getBroadcast(
+                        ctx, 500,
+                        Intent(ctx, AlertActionReceiver::class.java).setAction(AlertActionReceiver.ACTION_DISABLE_PREDICT),
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                    ),
+                ).build()
+            )
+            .build()
+        notify(ctx, ID_PREDICT, n)
     }
 
     fun stale(ctx: Context, minutes: Long, last: Reading?, error: String?) {
@@ -197,6 +279,31 @@ object Notifications {
         notify(ctx, ID_STALE, n)
     }
 
+    /** Напоминание о замене сенсора. */
+    fun sensor(ctx: Context, title: String, text: String) {
+        val n = Notification.Builder(ctx, CH_SENSOR)
+            .setSmallIcon(R.drawable.ic_stat)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setContentIntent(openApp(ctx))
+            .setAutoCancel(true)
+            .build()
+        notify(ctx, ID_SENSOR, n)
+    }
+
+    /** Утренняя сводка за ночь. */
+    fun summary(ctx: Context, title: String, text: String) {
+        val n = Notification.Builder(ctx, CH_SUMMARY)
+            .setSmallIcon(R.drawable.ic_stat)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setContentIntent(openApp(ctx))
+            .setAutoCancel(true)
+            .build()
+        notify(ctx, ID_SUMMARY, n)
+    }
+
     /** «Сахар в норме» (RECOVERY) или «Данные снова поступают» (RESUMED). */
     fun info(ctx: Context, type: AlertType, title: String, text: String) {
         val n = Notification.Builder(ctx, channelId(ctx, type))
@@ -210,8 +317,12 @@ object Notifications {
     }
 
     fun cancel(ctx: Context, kind: String) {
-        ctx.getSystemService(NotificationManager::class.java)
-            .cancel(if (kind == AlertEngine.KIND_LEVEL) ID_LEVEL else ID_STALE)
+        val id = when (kind) {
+            AlertEngine.KIND_LEVEL -> ID_LEVEL
+            AlertEngine.KIND_PREDICT -> ID_PREDICT
+            else -> ID_STALE
+        }
+        ctx.getSystemService(NotificationManager::class.java).cancel(id)
     }
 
     fun notify(ctx: Context, id: Int, n: Notification) {
@@ -229,18 +340,30 @@ object Notifications {
             minutes == 30 -> "🔕 30 мин"
             minutes == 60 -> "🔕 1 час"
             kind == AlertEngine.KIND_LEVEL -> "🔇 До нормализации"
+            kind == AlertEngine.KIND_PREDICT -> "👌 Понятно"
             else -> "🔇 До появления данных"
         }
         val intent = Intent(ctx, AlertActionReceiver::class.java)
             .setAction(if (minutes == 0) AlertActionReceiver.ACTION_SILENCE else AlertActionReceiver.ACTION_SNOOZE)
             .putExtra(AlertActionReceiver.EXTRA_KIND, kind)
             .putExtra(AlertActionReceiver.EXTRA_MINUTES, minutes)
-        val requestCode = (if (kind == AlertEngine.KIND_LEVEL) 100 else 200) + minutes
+        val requestCode = when (kind) {
+            AlertEngine.KIND_LEVEL -> 100
+            AlertEngine.KIND_PREDICT -> 300
+            else -> 200
+        } + minutes
         val pi = PendingIntent.getBroadcast(
             ctx, requestCode, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         return Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_stat), title, pi).build()
     }
+
+    /** Смахнули уведомление о сахаре — выключить громкий сигнал (сама тревога при этом продолжается). */
+    private fun stopSoundIntent(ctx: Context): PendingIntent = PendingIntent.getBroadcast(
+        ctx, 400,
+        Intent(ctx, AlertActionReceiver::class.java).setAction(AlertActionReceiver.ACTION_STOP_SOUND),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
 
     private fun openApp(ctx: Context): PendingIntent = PendingIntent.getActivity(
         ctx, 0,

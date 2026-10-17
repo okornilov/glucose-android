@@ -6,20 +6,33 @@ import android.media.RingtoneManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,29 +71,69 @@ fun ProfilesSection() {
     val edit = prefs.profile(editId) ?: active
     var dialog by remember { mutableStateOf<ProfileDialog?>(null) }
 
-    Section("Профили уведомлений")
+    SettingsGroup("Профили уведомлений", Icons.Default.Person) {
+        // Нажатие на строку — открыть профиль для настройки ниже; «Включить» — сделать активным
+        profiles.forEachIndexed { i, p ->
+            if (i > 0) GroupDivider()
+            val selected = p.id == edit.id
+            Box(
+                Modifier.background(
+                    if (selected) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f) else Color.Transparent
+                )
+            ) {
+                SettingRow(
+                    p.name,
+                    when {
+                        p.id == active.id && selected -> "Включён · настраивается ниже"
+                        p.id == active.id -> "Включён"
+                        selected -> "Настраивается ниже"
+                        else -> null
+                    },
+                    leading = {
+                        if (p.id == active.id) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = "Включён", tint = MaterialTheme.colorScheme.primary)
+                        } else {
+                            Dot(MaterialTheme.colorScheme.outlineVariant)
+                        }
+                    },
+                    onClick = { editId = p.id },
+                ) {
+                    if (p.id != active.id) {
+                        TextButton(onClick = { ProfileSwitcher.activate(ctx, p.id) }) { Text("Включить") }
+                    }
+                }
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            TextButton(onClick = { dialog = ProfileDialog.NEW }) {
+                Icon(Icons.Default.Add, contentDescription = null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Новый")
+            }
+            TextButton(onClick = { dialog = ProfileDialog.RENAME }) {
+                Icon(Icons.Default.Edit, contentDescription = null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Имя")
+            }
+            TextButton(onClick = { dialog = ProfileDialog.DELETE }, enabled = profiles.size > 1) {
+                Icon(Icons.Default.Delete, contentDescription = null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Удалить")
+            }
+        }
+    }
     Text(
-        "Профиль — пороги, какие уведомления слать, мелодии и вибрация. Быстро переключать: на главном экране, " +
-            "кнопками в уведомлении в шторке, плиткой в быстрых настройках и нажатием на профиль в виджете.",
+        "Переключать профили быстро: на главном экране, кнопками в шторке и плиткой в быстрых настройках.",
+        Modifier.padding(horizontal = 6.dp),
         style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        profiles.forEach { p ->
-            FilterChip(
-                selected = p.id == edit.id,
-                onClick = { editId = p.id },
-                label = { Text(if (p.id == active.id) "✓ ${p.name}" else p.name) },
-            )
-        }
-    }
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (edit.id != active.id) {
-            Button(onClick = { ProfileSwitcher.activate(ctx, edit.id) }) { Text("Включить") }
-        }
-        OutlinedButton(onClick = { dialog = ProfileDialog.NEW }) { Text("Новый") }
-        OutlinedButton(onClick = { dialog = ProfileDialog.RENAME }) { Text("Переименовать") }
-        if (profiles.size > 1) OutlinedButton(onClick = { dialog = ProfileDialog.DELETE }) { Text("Удалить") }
-    }
 
     when (dialog) {
         ProfileDialog.NEW -> NameDialog("Новый профиль", "Профиль ${profiles.size + 1}", onDismiss = { dialog = null }) { name ->
@@ -142,56 +195,93 @@ private fun ProfileEditor(p: Profile) {
     val prefs = ctx.app.prefs
     val update: ((Profile) -> Profile) -> Unit = { change -> prefs.updateProfile(p.id, change) }
     val current = { prefs.profile(p.id) ?: p }
+    val nested: @Composable () -> Unit = {} // пустое место слева — вложенная настройка
+    val minutes: (String) -> Int? = { it.trim().toIntOrNull() }
 
-    Text("Пороги, ммоль/л", style = MaterialTheme.typography.titleSmall)
-    NumberField(
-        label = "Низкий сахар: значение ≤",
-        initial = p.low.fmt(),
-        hint = "от 2 до 8 и меньше высокого порога",
-        parse = { it.replace(',', '.').toDoubleOrNull() },
-        valid = { it in 2.0..8.0 && it < current().high },
-    ) { v -> update { it.copy(low = v) } }
-    NumberField(
-        label = "Высокий сахар: значение >",
-        initial = p.high.fmt(),
-        hint = "от 6 до 25 и больше низкого порога",
-        parse = { it.replace(',', '.').toDoubleOrNull() },
-        valid = { it in 6.0..25.0 && it > current().low },
-    ) { v -> update { it.copy(high = v) } }
+    SettingsGroup("Пороги · ${p.name}") {
+        NumberSetting(
+            "Низкий сахар",
+            "Значение ≤ порога, от 2 до 8",
+            p.low.fmt(),
+            parse = { it.replace(',', '.').toDoubleOrNull() },
+            valid = { it in 2.0..8.0 && it < current().high },
+            leading = { Dot(LowColor) },
+        ) { v -> update { it.copy(low = v) } }
+        GroupDivider()
+        NumberSetting(
+            "Высокий сахар",
+            "Значение > порога, от 6 до 25",
+            p.high.fmt(),
+            parse = { it.replace(',', '.').toDoubleOrNull() },
+            valid = { it in 6.0..25.0 && it > current().low },
+            leading = { Dot(HighColor) },
+        ) { v -> update { it.copy(high = v) } }
+    }
 
-    Text("Какие уведомления слать", style = MaterialTheme.typography.titleSmall)
-    SwitchRow("🔴 Низкий сахар", p.notifyLow) { v -> update { it.copy(notifyLow = v) } }
-    SwitchRow("🟠 Высокий сахар", p.notifyHigh) { v -> update { it.copy(notifyHigh = v) } }
-    SwitchRow("⚠️ Нет данных", p.notifyStale) { v -> update { it.copy(notifyStale = v) } }
-    SwitchRow("✅ Сахар нормализовался", p.notifyRecovery) { v -> update { it.copy(notifyRecovery = v) } }
-    NumberField(
-        label = "Повторять, пока сахар вне диапазона, каждые N мин",
-        initial = p.repeatMinutes.toString(),
-        hint = "от 5 до 240",
-        parse = { it.trim().toIntOrNull() },
-        valid = { it in 5..240 },
-    ) { v -> update { it.copy(repeatMinutes = v) } }
-    NumberField(
-        label = "Предупреждать, если нет данных дольше N мин",
-        initial = p.staleMinutes.toString(),
-        hint = "от 10 до 240",
-        parse = { it.trim().toIntOrNull() },
-        valid = { it in 10..240 },
-    ) { v -> update { it.copy(staleMinutes = v) } }
+    SettingsGroup("Уведомления · ${p.name}") {
+        SwitchSetting("Низкий сахар", p.notifyLow, leading = { Dot(LowColor) }) { v -> update { it.copy(notifyLow = v) } }
+        if (p.notifyLow) {
+            NumberSetting(
+                "Повтор без реакции",
+                "От 1 до 30 мин",
+                p.lowRepeatMinutes.toString(), minutes, { it in 1..30 }, suffix = "мин", leading = nested,
+            ) { v -> update { it.copy(lowRepeatMinutes = v) } }
+            SwitchSetting(
+                "Громкий сигнал",
+                p.lowEscalate,
+                subtitle = "Со второго напоминания — через будильник, слышно в беззвучном режиме",
+                leading = nested,
+            ) { v -> update { it.copy(lowEscalate = v) } }
+        }
+        GroupDivider()
+        SwitchSetting(
+            "Скоро низкий",
+            p.notifyPredictLow,
+            subtitle = "Прогноз: сахар быстро падает и скоро станет низким",
+            leading = { Dot(LowColor.copy(alpha = 0.45f)) },
+        ) { v -> update { it.copy(notifyPredictLow = v) } }
+        if (p.notifyPredictLow) {
+            NumberSetting(
+                "Смотреть вперёд",
+                "От 10 до 45 мин",
+                p.predictMinutes.toString(), minutes, { it in 10..45 }, suffix = "мин", leading = nested,
+            ) { v -> update { it.copy(predictMinutes = v) } }
+        }
+        GroupDivider()
+        SwitchSetting("Высокий сахар", p.notifyHigh, leading = { Dot(HighColor) }) { v -> update { it.copy(notifyHigh = v) } }
+        if (p.notifyHigh) {
+            NumberSetting(
+                "Повтор",
+                "От 5 до 240 мин",
+                p.repeatMinutes.toString(), minutes, { it in 5..240 }, suffix = "мин", leading = nested,
+            ) { v -> update { it.copy(repeatMinutes = v) } }
+        }
+        GroupDivider()
+        SwitchSetting("Нет данных", p.notifyStale, leading = { Dot(MaterialTheme.colorScheme.outline) }) { v -> update { it.copy(notifyStale = v) } }
+        if (p.notifyStale) {
+            NumberSetting(
+                "Без замеров дольше",
+                "От 10 до 240 мин",
+                p.staleMinutes.toString(), minutes, { it in 10..240 }, suffix = "мин", leading = nested,
+            ) { v -> update { it.copy(staleMinutes = v) } }
+        }
+        GroupDivider()
+        SwitchSetting("Сахар нормализовался", p.notifyRecovery, leading = { Dot(InRangeColor) }) { v -> update { it.copy(notifyRecovery = v) } }
+    }
 
-    Text("Мелодия и вибрация", style = MaterialTheme.typography.titleSmall)
-    Text(
-        "«⚙» — важность, экран блокировки и «Не беспокоить» в настройках системы.",
-        style = MaterialTheme.typography.bodySmall,
-    )
-    AlertType.entries.forEach { type -> AlertTypeRow(p, type) }
+    SettingsGroup("Мелодии и вибрация · ${p.name}") {
+        AlertType.entries.forEachIndexed { i, type ->
+            if (i > 0) GroupDivider()
+            AlertTypeRow(p, type)
+        }
+    }
 }
 
 /** Мелодия и вибрация одного типа уведомлений в профиле. */
 @Composable
 private fun AlertTypeRow(p: Profile, type: AlertType) {
     val ctx = LocalContext.current
-    var vibrationMenu by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
         val data = result.data ?: return@rememberLauncherForActivityResult
@@ -203,51 +293,75 @@ private fun AlertTypeRow(p: Profile, type: AlertType) {
         }
         Notifications.changeSound(ctx, p.id, type, value)
     }
+    val pickSound = {
+        picker.launch(
+            Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
+                .putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, type.ringtoneType)
+                .putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "${type.title} · ${p.name}")
+                .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                .putExtra(RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI, RingtoneManager.getDefaultUri(type.ringtoneType))
+                .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, true)
+                .putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Notifications.soundUri(p, type))
+        )
+    }
 
-    Column(Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(type.title, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-            TextButton(onClick = { openNotificationSettings(ctx, Notifications.channelId(p, type)) }) { Text("⚙") }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "🎵 ${Notifications.soundTitle(ctx, p, type)}",
-                Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            TextButton(onClick = {
-                picker.launch(
-                    Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
-                        .putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, type.ringtoneType)
-                        .putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "${type.title} · ${p.name}")
-                        .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
-                        .putExtra(RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI, RingtoneManager.getDefaultUri(type.ringtoneType))
-                        .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, true)
-                        .putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Notifications.soundUri(p, type))
-                )
-            }) { Text("Мелодия") }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "📳 ${Notifications.vibration(p, type).title}",
-                Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Box {
-                TextButton(onClick = { vibrationMenu = true }) { Text("Вибрация") }
-                DropdownMenu(expanded = vibrationMenu, onDismissRequest = { vibrationMenu = false }) {
-                    Vibration.entries.forEach { v ->
-                        DropdownMenuItem(
-                            text = { Text(v.title) },
-                            onClick = {
-                                vibrationMenu = false
-                                Notifications.changeVibration(ctx, p.id, type, v)
-                                v.preview(ctx)
-                            },
-                        )
-                    }
-                }
+    // Нажатие на строку — выбрать мелодию; «⋮» — вибрация и системные настройки канала
+    Box {
+        SettingRow(
+            type.title,
+            "${Notifications.soundTitle(ctx, p, type)} · ${Notifications.vibration(p, type).title}",
+            leading = { Dot(typeColor(type)) },
+            onClick = { pickSound() },
+        ) {
+            IconButton(onClick = { menu = true }) {
+                Icon(Icons.Default.MoreVert, contentDescription = "Вибрация и настройки", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, modifier = Modifier.align(Alignment.TopEnd)) {
+            DropdownMenuItem(
+                text = { Text("Мелодия…") },
+                onClick = {
+                    menu = false
+                    pickSound()
+                },
+            )
+            HorizontalDivider()
+            Text(
+                "Вибрация",
+                Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            val currentVibration = Notifications.vibration(p, type)
+            Vibration.entries.forEach { v ->
+                DropdownMenuItem(
+                    text = { Text(v.title) },
+                    leadingIcon = { if (v == currentVibration) Icon(Icons.Default.Check, contentDescription = "Выбрана") },
+                    onClick = {
+                        menu = false
+                        Notifications.changeVibration(ctx, p.id, type, v)
+                        v.preview(ctx)
+                    },
+                )
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Системные настройки…") },
+                leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                onClick = {
+                    menu = false
+                    openNotificationSettings(ctx, Notifications.channelId(p, type))
+                },
+            )
+        }
     }
+}
+
+private fun typeColor(type: AlertType): Color = when (type) {
+    AlertType.LOW -> LowColor
+    AlertType.PREDICT_LOW -> LowColor.copy(alpha = 0.45f)
+    AlertType.HIGH -> HighColor
+    AlertType.STALE -> Color(0xFF9E9E9E)
+    AlertType.RECOVERY -> InRangeColor
+    AlertType.RESUMED -> InRangeColor.copy(alpha = 0.45f)
 }

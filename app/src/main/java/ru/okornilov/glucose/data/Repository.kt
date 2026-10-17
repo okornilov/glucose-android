@@ -48,15 +48,16 @@ class Repository(
                 _error.value = "Укажите логин и пароль LibreLinkUp в настройках"
             } else {
                 try {
-                    val (current, history) = client().fetch()
+                    val (current, history, sensorStart) = client().fetch()
                     _error.value = null
+                    if (sensorStart != null) prefs.sensorStart = sensorStart
                     db.insert(history + listOfNotNull(current))
                     db.deleteBefore(now - KEEP_DAYS * 24 * 3600_000L)
                     _dataVersion.update { it + 1 }
                     val prev = _last.value
                     if (current != null && (prev == null || current.ts > prev.ts)) {
                         _last.value = current
-                        if (prefs.monitoring) alerts.onReading(current, now)
+                        if (prefs.monitoring) alerts.onReading(current, now, db.between(now - RECENT_MS, now + 60_000))
                     }
                 } catch (e: Exception) {
                     _error.value = e.message ?: e.javaClass.simpleName
@@ -70,5 +71,6 @@ class Repository(
 
     companion object {
         private const val KEEP_DAYS = 90
+        private const val RECENT_MS = 20 * 60_000L
     }
 }

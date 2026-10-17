@@ -3,6 +3,7 @@ package ru.okornilov.glucose.data
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /** Показание сенсора. ts — момент замера, epoch millis (UTC). */
 data class Reading(val ts: Long, val mgdl: Int, val trend: Int? = null) {
@@ -20,7 +21,8 @@ data class Reading(val ts: Long, val mgdl: Int, val trend: Int? = null) {
         }
 }
 
-fun Double.fmt(): String = String.format("%.1f", this)
+/** Одна цифра после точки — разделитель всегда точка, независимо от языка системы. */
+fun Double.fmt(): String = String.format(Locale.US, "%.1f", this)
 
 private val HHMM = DateTimeFormatter.ofPattern("HH:mm")
 

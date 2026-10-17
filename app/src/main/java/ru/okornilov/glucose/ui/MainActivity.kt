@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import ru.okornilov.glucose.alerts.AlarmPlayer
 import ru.okornilov.glucose.app
 import ru.okornilov.glucose.service.MonitorService
 
@@ -43,15 +44,27 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         // Сервис мог быть остановлен системой или принудительной остановкой — поднимаем снова
         if (app.prefs.monitoring) MonitorService.start(this)
-        setContent { GlucoseTheme { MainScreen() } }
+        val openSettings = intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false)
+        setContent { GlucoseTheme { MainScreen(openSettings) } }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Открыли приложение — тревогу увидели, громкий сигнал больше не нужен
+        AlarmPlayer.stop()
+    }
+
+    companion object {
+        /** Открыть сразу настройки (например, из уведомления или adb). */
+        const val EXTRA_OPEN_SETTINGS = "open_settings"
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MainScreen() {
+private fun MainScreen(openSettings: Boolean = false) {
     val ctx = LocalContext.current
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var tab by rememberSaveable { mutableIntStateOf(if (openSettings) 1 else 0) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -60,24 +73,29 @@ private fun MainScreen() {
             permission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
-    val settings = tab == 1
-    // Системная «Назад» из настроек возвращает на главный экран
-    BackHandler(enabled = settings) { tab = 0 }
+    // 0 — главный экран, 1 — настройки, 2 — отчёт
+    val inner = tab != 0
+    // Системная «Назад» из настроек и отчёта возвращает на главный экран
+    BackHandler(enabled = inner) { tab = 0 }
     Scaffold(
         topBar = {
             // Заголовка на главном экране нет — экономим место; в настройках только «назад»
-            if (settings) {
+            if (inner) {
                 TopAppBar(
-                    title = { Text("Настройки", fontWeight = FontWeight.SemiBold) },
+                    title = { Text(if (tab == 1) "Настройки" else "Отчёт", fontWeight = FontWeight.SemiBold) },
                     navigationIcon = { IconButton(onClick = { tab = 0 }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад") } },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                     expandedHeight = 48.dp,
                 )
             }
         },
     ) { padding ->
         Box(Modifier.padding(padding)) {
-            if (settings) SettingsScreen() else HomeScreen(onOpenSettings = { tab = 1 })
+            when (tab) {
+                1 -> SettingsScreen()
+                2 -> ReportScreen()
+                else -> HomeScreen(onOpenSettings = { tab = 1 }, onOpenReport = { tab = 2 })
+            }
         }
     }
 }

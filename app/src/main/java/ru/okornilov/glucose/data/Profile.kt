@@ -17,6 +17,14 @@ data class Profile(
     val repeatMinutes: Int = 20,
     /** Через сколько минут без новых данных предупреждать. */
     val staleMinutes: Int = 30,
+    /** Предупреждать заранее, если сахар падает и по прогнозу станет низким. По умолчанию выключено. */
+    val notifyPredictLow: Boolean = false,
+    /** На сколько минут вперёд смотрит прогноз. */
+    val predictMinutes: Int = 20,
+    /** Как часто повторять тревогу о низком сахаре, пока на неё не отреагировали. */
+    val lowRepeatMinutes: Int = 5,
+    /** Если на низкий сахар не отреагировали — громкий сигнал через поток будильника (слышен в беззвучном режиме). */
+    val lowEscalate: Boolean = true,
     /** Тип уведомления (AlertType.key) → "" — мелодия по умолчанию, [SILENT] — без звука, иначе URI. */
     val sounds: Map<String, String> = emptyMap(),
     /** Тип уведомления → Vibration.key; нет записи — вибрация по умолчанию для типа. */
@@ -39,6 +47,10 @@ data class Profile(
         .put("notifyRecovery", notifyRecovery)
         .put("repeatMinutes", repeatMinutes)
         .put("staleMinutes", staleMinutes)
+        .put("notifyPredictLow", notifyPredictLow)
+        .put("predictMinutes", predictMinutes)
+        .put("lowRepeatMinutes", lowRepeatMinutes)
+        .put("lowEscalate", lowEscalate)
         .put("sounds", JSONObject(sounds))
         .put("vibrations", JSONObject(vibrations))
         .put("channelVersions", JSONObject(channelVersions))
@@ -58,6 +70,10 @@ data class Profile(
                 notifyRecovery = o.optBoolean("notifyRecovery", d.notifyRecovery),
                 repeatMinutes = o.optInt("repeatMinutes", d.repeatMinutes),
                 staleMinutes = o.optInt("staleMinutes", d.staleMinutes),
+                notifyPredictLow = o.optBoolean("notifyPredictLow", d.notifyPredictLow),
+                predictMinutes = o.optInt("predictMinutes", d.predictMinutes),
+                lowRepeatMinutes = o.optInt("lowRepeatMinutes", d.lowRepeatMinutes),
+                lowEscalate = o.optBoolean("lowEscalate", d.lowEscalate),
                 sounds = o.optJSONObject("sounds").toMap { getString(it) },
                 vibrations = o.optJSONObject("vibrations").toMap { getString(it) },
                 channelVersions = o.optJSONObject("channelVersions").toMap { getInt(it) },

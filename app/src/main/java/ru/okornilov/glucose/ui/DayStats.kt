@@ -103,7 +103,7 @@ private fun StatTile(label: String, value: Double, low: Double, high: Double, mo
 
 /** Полоса из трёх сегментов: ниже / в диапазоне / выше. */
 @Composable
-private fun RangeBar(below: Float, inRange: Float, above: Float) {
+internal fun RangeBar(below: Float, inRange: Float, above: Float) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -126,7 +126,7 @@ private fun RangeBar(below: Float, inRange: Float, above: Float) {
 }
 
 @Composable
-private fun Legend(color: Color, label: String, value: String) {
+internal fun Legend(color: Color, label: String, value: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             Modifier

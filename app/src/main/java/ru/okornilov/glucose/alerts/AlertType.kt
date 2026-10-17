@@ -13,6 +13,7 @@ enum class AlertType(
     val defaultVibration: Vibration,
 ) {
     LOW("low", "Низкий сахар", NotificationManager.IMPORTANCE_HIGH, RingtoneManager.TYPE_ALARM, Vibration.ALARM),
+    PREDICT_LOW("predict_low", "Скоро низкий сахар", NotificationManager.IMPORTANCE_HIGH, RingtoneManager.TYPE_NOTIFICATION, Vibration.DEFAULT),
     HIGH("high", "Высокий сахар", NotificationManager.IMPORTANCE_HIGH, RingtoneManager.TYPE_NOTIFICATION, Vibration.DEFAULT),
     STALE("stale", "Нет данных", NotificationManager.IMPORTANCE_HIGH, RingtoneManager.TYPE_NOTIFICATION, Vibration.DEFAULT),
     RECOVERY("recovery", "Сахар в норме", NotificationManager.IMPORTANCE_DEFAULT, RingtoneManager.TYPE_NOTIFICATION, Vibration.DEFAULT),

@@ -18,7 +18,6 @@ import ru.okornilov.glucose.data.Freshness
 import ru.okornilov.glucose.data.Reading
 import ru.okornilov.glucose.data.fmt
 import ru.okornilov.glucose.data.freshness
-import ru.okornilov.glucose.profile.ProfileReceiver
 import ru.okornilov.glucose.render.ChartPainter
 import ru.okornilov.glucose.ui.MainActivity
 
@@ -113,11 +112,10 @@ class GlucoseWidget : AppWidgetProvider() {
 
             views.setOnClickPendingIntent(R.id.widget_root, openAppIntent(ctx))
 
-            // Профиль показываем, только если их несколько; нажатие — следующий профиль
+            // Профиль показываем, только если их несколько; только для информации — переключать его на виджете нельзя
             if (prefs.profiles().size > 1) {
                 views.setViewVisibility(R.id.widget_profile, View.VISIBLE)
-                views.setTextViewText(R.id.widget_profile, "⇄ ${prefs.active.name}")
-                views.setOnClickPendingIntent(R.id.widget_profile, ProfileReceiver.nextIntent(ctx))
+                views.setTextViewText(R.id.widget_profile, prefs.active.name)
             } else {
                 views.setViewVisibility(R.id.widget_profile, View.GONE)
             }
