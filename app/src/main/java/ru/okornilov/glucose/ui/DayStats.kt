@@ -27,10 +27,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ru.okornilov.glucose.data.Reading
+import ru.okornilov.glucose.data.dayStats
 import ru.okornilov.glucose.data.fmt
-
-private const val MINUTE_MS = 60_000L
-private const val MAX_WEIGHT_MS = 15 * MINUTE_MS
+import ru.okornilov.glucose.data.percent
 
 /** Статистика за день: мин/среднее/макс и время в диапазоне. */
 @Composable
@@ -45,26 +44,17 @@ fun DayStats(readings: List<Reading>, low: Double, high: Double) {
         }
         return
     }
-    val values = readings.map { it.mmol }
-    val n = values.size
-    // Замеры неравномерные (история LibreView — раз в 15 мин, мониторинг — раз в минуту),
-    // поэтому доли и среднее считаем по времени: замер действует до следующего, но не дольше 15 мин
-    val weights = readings.mapIndexed { i, r ->
-        val next = readings.getOrNull(i + 1)?.ts ?: (r.ts + MINUTE_MS)
-        (next - r.ts).coerceIn(MINUTE_MS, MAX_WEIGHT_MS).toDouble()
-    }
-    val total = weights.sum()
-    fun share(match: (Double) -> Boolean) =
-        (values.indices.filter { match(values[it]) }.sumOf { weights[it] } / total).toFloat()
-    val belowShare = share { it <= low }
-    val aboveShare = share { it > high }
-    val inRangeShare = 1f - belowShare - aboveShare
-    val avg = values.indices.sumOf { values[it] * weights[it] } / total
+    val stats = dayStats(readings, low, high) ?: return
+    val n = stats.count
+    val belowShare = stats.below
+    val aboveShare = stats.above
+    val inRangeShare = stats.inRange
+    val avg = stats.avg
 
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        StatTile("Мин", values.min(), low, high, Modifier.weight(1f))
+        StatTile("Мин", stats.min, low, high, Modifier.weight(1f))
         StatTile("Среднее", avg, low, high, Modifier.weight(1f))
-        StatTile("Макс", values.max(), low, high, Modifier.weight(1f))
+        StatTile("Макс", stats.max, low, high, Modifier.weight(1f))
     }
 
     Card(Modifier.fillMaxWidth()) {
@@ -152,4 +142,3 @@ private fun Legend(color: Color, label: String, value: String) {
     }
 }
 
-private fun percent(share: Float): String = "${Math.round(share * 100)}%"

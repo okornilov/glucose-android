@@ -1,6 +1,7 @@
 package ru.okornilov.glucose.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -10,15 +11,25 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -39,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -52,6 +64,7 @@ import ru.okornilov.glucose.data.ago
 import ru.okornilov.glucose.data.fmt
 import ru.okornilov.glucose.data.hhmm
 import ru.okornilov.glucose.profile.ProfileSwitcher
+import ru.okornilov.glucose.share.Sharer
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -93,6 +106,16 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
         value = withContext(Dispatchers.IO) { app.db.between(start, end) }
     }
 
+    // Картинка рисуется не на главном потоке, затем — системное меню «Поделиться»
+    val share: () -> Unit = {
+        scope.launch {
+            val intent = withContext(Dispatchers.Default) {
+                Sharer.intent(ctx, last, error, day, readings, start, end, low, high)
+            }
+            ctx.startActivity(intent)
+        }
+    }
+
     // Всё на одном экране: график забирает оставшееся место. Если экран слишком низкий
     // (или крупный шрифт в системе) — обычная прокрутка с графиком фиксированной высоты.
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -105,28 +128,46 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // Верхняя строка: профили слева (прокручиваются), действия справа
             val profiles = app.prefs.profiles()
-            if (profiles.size > 1) {
-                val active = app.prefs.active
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    profiles.forEach { p ->
-                        FilterChip(
-                            selected = p.id == active.id,
-                            onClick = { ProfileSwitcher.activate(ctx, p.id) },
-                            label = { Text(p.name) },
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                // Профиль — выпадающим списком, чтобы строка помещалась при любом числе профилей
+                Box(Modifier.weight(1f)) {
+                    var profileMenu by remember { mutableStateOf(false) }
+                    val active = app.prefs.active
+                    OutlinedButton(
+                        onClick = { profileMenu = true },
+                        contentPadding = PaddingValues(start = 14.dp, end = 6.dp),
+                    ) {
+                        Text(active.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Выбрать профиль")
+                    }
+                    DropdownMenu(expanded = profileMenu, onDismissRequest = { profileMenu = false }) {
+                        profiles.forEach { p ->
+                            DropdownMenuItem(
+                                text = { Text(p.name) },
+                                leadingIcon = {
+                                    if (p.id == active.id) Icon(Icons.Default.Check, contentDescription = "Активный")
+                                },
+                                onClick = {
+                                    profileMenu = false
+                                    ProfileSwitcher.activate(ctx, p.id)
+                                },
+                            )
+                        }
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Настроить профили…") },
+                            leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                            onClick = {
+                                profileMenu = false
+                                onOpenSettings()
+                            },
                         )
                     }
                 }
-            }
-
-            CurrentCard(last, error, now, low, high)
-
-            Row(Modifier.height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { day = day.minusDays(1) }) { Text("◀") }
-                Text(if (day == today) "Сегодня" else DAY_FORMAT.format(day), style = MaterialTheme.typography.titleMedium)
-                TextButton(onClick = { day = day.plusDays(1) }, enabled = day < today) { Text("▶") }
-                Spacer(Modifier.weight(1f))
-                TextButton(
+                IconButton(onClick = share) { Icon(Icons.Default.Share, contentDescription = "Поделиться") }
+                IconButton(
                     onClick = {
                         scope.launch {
                             refreshing = true
@@ -135,13 +176,28 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                         }
                     },
                     enabled = !refreshing,
-                ) { Text(if (refreshing) "Обновляю…" else "Обновить") }
+                ) {
+                    if (refreshing) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Refresh, contentDescription = "Обновить")
+                    }
+                }
                 Box {
                     var menu by remember { mutableStateOf(false) }
-                    IconButton(onClick = { menu = true }) { Text("⋮", fontSize = 22.sp) }
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Меню") }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(
-                            text = { Text("⚙️  Настройки") },
+                            text = { Text("Поделиться") },
+                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                            onClick = {
+                                menu = false
+                                share()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Настройки") },
+                            leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
                             onClick = {
                                 menu = false
                                 onOpenSettings()
@@ -149,6 +205,14 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                         )
                     }
                 }
+            }
+
+            CurrentCard(last, error, now, low, high)
+
+            Row(Modifier.height(36.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { day = day.minusDays(1) }) { Text("◀") }
+                Text(if (day == today) "Сегодня" else DAY_FORMAT.format(day), style = MaterialTheme.typography.titleMedium)
+                TextButton(onClick = { day = day.plusDays(1) }, enabled = day < today) { Text("▶") }
             }
 
             GlucoseChart(

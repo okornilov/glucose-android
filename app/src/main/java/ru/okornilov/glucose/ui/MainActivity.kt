@@ -12,7 +12,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -66,7 +69,7 @@ private fun MainScreen() {
             if (settings) {
                 TopAppBar(
                     title = { Text("Настройки", fontWeight = FontWeight.SemiBold) },
-                    navigationIcon = { IconButton(onClick = { tab = 0 }) { Text("←", fontSize = 22.sp) } },
+                    navigationIcon = { IconButton(onClick = { tab = 0 }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад") } },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                     expandedHeight = 48.dp,
                 )
