@@ -57,28 +57,27 @@ fun DayStats(readings: List<Reading>, low: Double, high: Double) {
         StatTile("Макс", stats.max, low, high, Modifier.weight(1f))
     }
 
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Время в диапазоне", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                Text(
-                    "$n замеров · ",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    percent(inRangeShare),
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = InRangeColor,
-                )
-            }
-            RangeBar(belowShare, inRangeShare, aboveShare)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Legend(LowColor, "ниже ${low.fmt()}", percent(belowShare))
-                Legend(InRangeColor, "в диапазоне", percent(inRangeShare))
-                Legend(HighColor, "выше ${high.fmt()}", percent(aboveShare))
-            }
+    // Без карточки — прозрачный блок на фоне экрана
+    Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Время в диапазоне", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            Text(
+                "$n замеров · ",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                percent(inRangeShare),
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = InRangeColor,
+            )
+        }
+        RangeBar(belowShare, inRangeShare, aboveShare)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Legend(LowColor, "ниже ${low.fmt()}", percent(belowShare))
+            Legend(InRangeColor, "в диапазоне", percent(inRangeShare))
+            Legend(HighColor, "выше ${high.fmt()}", percent(aboveShare))
         }
     }
 }

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Описание для One UI (samsung.appwidget.monotone.info): маленький виджет экрана блокировки -->
+<samsung-appwidget-info xmlns:app="http://schemas.android.com/apk/res-auto"
+    app:allowMultipleSizes="true"
+    app:initialLayoutTiny="@layout/widget_lock"
+    app:previewLayoutTiny="@layout/widget_lock"
+    app:targetHost="6"
+    app:widgetSize="1" />

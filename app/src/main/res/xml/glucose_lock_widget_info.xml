@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Категория — в values/integers.xml. targetHost/widgetSize/widgetStyle — как у виджетов погоды на экране блокировки One UI -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:description="@string/lock_widget_description"
+    android:initialKeyguardLayout="@layout/widget_lock"
+    android:initialLayout="@layout/widget_lock"
+    android:minWidth="40dp"
+    android:minHeight="40dp"
+    android:previewLayout="@layout/widget_lock"
+    android:resizeMode="none"
+    android:targetCellWidth="1"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="1800000"
+    android:widgetCategory="@integer/lock_widget_category"
+    app:previewLayoutTiny="@layout/widget_lock"
+    app:targetHost="6"
+    app:widgetSize="1"
+    app:widgetStyle="2" />

@@ -10,10 +10,12 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import androidx.core.content.FileProvider
 import ru.okornilov.glucose.data.DayStatsData
+import ru.okornilov.glucose.data.Freshness
 import ru.okornilov.glucose.data.Reading
 import ru.okornilov.glucose.data.Zone
 import ru.okornilov.glucose.data.dayStats
 import ru.okornilov.glucose.data.fmt
+import ru.okornilov.glucose.data.freshness
 import ru.okornilov.glucose.data.hhmm
 import ru.okornilov.glucose.data.percent
 import ru.okornilov.glucose.data.zoneOf
@@ -26,7 +28,6 @@ import java.time.format.DateTimeFormatter
 
 /** «Поделиться»: картинка с текущим значением, графиком и статистикой дня плюс то же текстом. */
 object Sharer {
-    private const val FRESH_MINUTES = 5
     private const val BG = 0xFF1E1F22.toInt()
     private val DATE = DateTimeFormatter.ofPattern("d MMMM")
 
@@ -66,9 +67,14 @@ object Sharer {
         Zone.HIGH -> "выше нормы"
     }
 
-    private fun staleMinutes(last: Reading, error: String?, now: Long): Long? {
+    /** Пояснение к устаревшему значению или null, если оно свежее. */
+    private fun staleNote(last: Reading, error: String?, now: Long): String? {
         val age = (now - last.ts) / 60_000
-        return if (error != null || age >= FRESH_MINUTES) age else null
+        return when (freshness(last, error, now)) {
+            Freshness.FRESH -> null
+            Freshness.NO_SERVER -> "нет связи с сервером, замер $age мин назад"
+            Freshness.NO_NEW_DATA -> "новых данных нет $age мин"
+        }
     }
 
     private fun dayTitle(day: LocalDate): String =
@@ -82,7 +88,7 @@ object Sharer {
                 append("🩸 Сахар: ${last.mmol.fmt()} ммоль/л ${last.arrow} — ${status(last.mmol, low, high)}\n")
                 val lastDay = Instant.ofEpochMilli(last.ts).atZone(ZoneId.systemDefault()).toLocalDate()
                 append("Замер: ${if (lastDay == LocalDate.now()) "сегодня" else DATE.format(lastDay)} в ${hhmm(last.ts)}")
-                staleMinutes(last, error, now)?.let { append("\n⚠ Данные не обновлялись $it мин") }
+                staleNote(last, error, now)?.let { append("\n⚠ ${it.replaceFirstChar(Char::uppercase)}") }
             }
             if (stats != null) {
                 append("\n\n${dayTitle(day)}: мин ${stats.min.fmt()} · среднее ${stats.avg.fmt()} · макс ${stats.max.fmt()}\n")
@@ -114,7 +120,7 @@ object Sharer {
         if (last == null) {
             c.drawText("Нет данных", pad, 190f, paint(110f, white, bold = true))
         } else {
-            val stale = staleMinutes(last, error, now)
+            val stale = staleNote(last, error, now)
             val level = ChartPainter.levelColor(last.mmol, low, high)
             // Устаревшее значение — приглушённым цветом, как в приложении
             val valueColor = if (stale != null) (level and 0x00FFFFFF) or 0x80000000.toInt() else level
@@ -131,7 +137,7 @@ object Sharer {
             val statusText = status(last.mmol, low, high).replaceFirstChar { it.uppercase() }
             c.drawText(statusText, pad, 272f, statusPaint)
             if (stale != null) {
-                c.drawText("  ⚠ данные не обновлялись $stale мин", pad + statusPaint.measureText(statusText), 272f, paint(32f, ChartPainter.LOW_COLOR))
+                c.drawText("  ⚠ $stale", pad + statusPaint.measureText(statusText), 272f, paint(32f, ChartPainter.LOW_COLOR))
             }
         }
 

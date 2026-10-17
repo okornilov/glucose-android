@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Виджет экрана блокировки: без фона, как погода и заряд батареи на Samsung -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/lock_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="2dp">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="22dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/lock_value"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center_vertical"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:shadowColor="#99000000"
+            android:shadowDy="1"
+            android:shadowRadius="3"
+            android:text="—"
+            android:textColor="#FFFFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/lock_arrow"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_marginStart="1dp"
+            android:gravity="center_vertical"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:shadowColor="#99000000"
+            android:shadowDy="1"
+            android:shadowRadius="3"
+            android:textColor="#FFFFFFFF"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/lock_time"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:shadowColor="#99000000"
+        android:shadowDy="1"
+        android:shadowRadius="3"
+        android:textColor="#E6FFFFFF"
+        android:textSize="10sp" />
+</LinearLayout>

@@ -2,5 +2,7 @@
 <resources>
     <string name="app_name">Сахар</string>
     <string name="widget_description">Текущий сахар и график за 3 часа</string>
+    <string name="lock_widget_description">Сахар на экране блокировки</string>
+    <string name="lock_widget_label">Сахар · блокировка</string>
     <string name="tile_label">Профиль сахара</string>
 </resources>

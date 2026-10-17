@@ -19,11 +19,13 @@ import android.net.Uri
 import android.util.Log
 import ru.okornilov.glucose.R
 import ru.okornilov.glucose.app
+import ru.okornilov.glucose.data.Freshness
 import ru.okornilov.glucose.data.Profile
 import ru.okornilov.glucose.data.Reading
+import ru.okornilov.glucose.data.ago
 import ru.okornilov.glucose.data.describe
 import ru.okornilov.glucose.data.fmt
-import ru.okornilov.glucose.data.hhmm
+import ru.okornilov.glucose.data.freshness
 import ru.okornilov.glucose.profile.ProfileReceiver
 import ru.okornilov.glucose.ui.MainActivity
 
@@ -138,7 +140,13 @@ object Notifications {
         if (last != null) {
             b.setSmallIcon(Icon.createWithBitmap(valueBitmap(last.mmol.fmt())))
                 .setContentTitle("${last.mmol.fmt()} ммоль/л ${last.arrow}")
-                .setContentText(error?.let { "⚠ $it" } ?: "Замер в ${hhmm(last.ts)} · профиль «${profile.name}»")
+                .setContentText(
+                    when (freshness(last, error)) {
+                        Freshness.NO_SERVER -> "⚠ Нет связи с сервером · замер ${ago(last.ts)}"
+                        Freshness.NO_NEW_DATA -> "⚠ Новых данных нет · замер ${ago(last.ts)}"
+                        Freshness.FRESH -> "Замер ${ago(last.ts)} · профиль «${profile.name}»"
+                    }
+                )
         } else {
             b.setSmallIcon(R.drawable.ic_stat)
                 .setContentTitle("Нет данных")

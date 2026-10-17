@@ -14,14 +14,15 @@ import android.view.View
 import android.widget.RemoteViews
 import ru.okornilov.glucose.R
 import ru.okornilov.glucose.app
+import ru.okornilov.glucose.data.Freshness
 import ru.okornilov.glucose.data.Reading
 import ru.okornilov.glucose.data.fmt
-import ru.okornilov.glucose.data.hhmm
+import ru.okornilov.glucose.data.freshness
 import ru.okornilov.glucose.profile.ProfileReceiver
 import ru.okornilov.glucose.render.ChartPainter
 import ru.okornilov.glucose.ui.MainActivity
 
-/** Виджет рабочего стола: текущее значение, время замера и график за последние 3 часа. */
+/** Виджет рабочего стола: текущее значение, давность замера и график за последние 3 часа. */
 class GlucoseWidget : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, manager: AppWidgetManager, appWidgetIds: IntArray) {
@@ -34,18 +35,41 @@ class GlucoseWidget : AppWidgetProvider() {
 
     companion object {
         private const val WINDOW_MS = 3 * 3600_000L
-        private const val FRESH_MINUTES = 5
 
         // Ширина колонки со значением и отступы, dp — чтобы оценить место под график
         private const val VALUE_COLUMN_DP = 104
         private const val PADDING_DP = 34
 
 
-        /** Вызывается после каждого опроса LibreView. */
+        /** Вызывается после каждого опроса LibreView: обновляет виджеты рабочего стола и экрана блокировки. */
         fun updateAll(ctx: Context) {
             val manager = AppWidgetManager.getInstance(ctx)
             manager.getAppWidgetIds(ComponentName(ctx, GlucoseWidget::class.java)).forEach { update(ctx, manager, it) }
+            LockWidget.updateAll(ctx, manager)
         }
+
+        /** Цвет значения: по зоне, устаревшее — приглушённое. */
+        internal fun valueColor(last: Reading, freshness: Freshness, low: Double, high: Double): Int {
+            val level = ChartPainter.levelColor(last.mmol, low, high)
+            return if (freshness == Freshness.FRESH) level else (level and 0x00FFFFFF) or 0x73000000
+        }
+
+        /** Строка под значением: сколько минут назад замер и, если он устарел, — почему. */
+        internal fun ageText(last: Reading, freshness: Freshness, now: Long, short: Boolean = false): String {
+            val minutes = (now - last.ts) / 60_000
+            val age = if (minutes < 1) "сейчас" else "$minutes мин"
+            return when (freshness) {
+                Freshness.FRESH -> if (short) age else if (minutes < 1) "замер только что" else "замер $minutes мин назад"
+                Freshness.NO_SERVER -> if (short) "⚠ $age" else "⚠ нет связи · $age назад"
+                Freshness.NO_NEW_DATA -> if (short) "⚠ $age" else "⚠ нет данных · $age назад"
+            }
+        }
+
+        internal fun openAppIntent(ctx: Context): PendingIntent = PendingIntent.getActivity(
+            ctx, 0,
+            Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
 
         private fun update(ctx: Context, manager: AppWidgetManager, id: Int) {
             val app = ctx.app
@@ -58,19 +82,17 @@ class GlucoseWidget : AppWidgetProvider() {
             if (last == null) {
                 views.setTextViewText(R.id.widget_value, "—")
                 views.setTextColor(R.id.widget_value, 0xFFFFFFFF.toInt())
-                views.setTextViewText(R.id.widget_time, "нет данных")
+                views.setTextViewText(R.id.widget_arrow, "")
+                views.setTextViewText(R.id.widget_time, if (app.repo.error.value != null) "нет связи" else "нет данных")
             } else {
-                val ageMinutes = (now - last.ts) / 60_000
-                // Устаревшее значение (запрос не удался или замер старше 5 мин) — приглушённым цветом
-                val stale = app.repo.error.value != null || ageMinutes >= FRESH_MINUTES
-                val level = color(last.mmol, prefs.low, prefs.high)
-                views.setTextViewText(R.id.widget_value, "${last.mmol.fmt()} ${last.arrow}")
-                views.setTextColor(R.id.widget_value, if (stale) (level and 0x00FFFFFF) or 0x73000000 else level)
-                views.setTextViewText(
-                    R.id.widget_time,
-                    if (stale) "⚠ замер $ageMinutes мин назад" else "замер в ${hhmm(last.ts)}",
-                )
-                views.setTextColor(R.id.widget_time, if (stale) ChartPainter.LOW_COLOR else 0xE6FFFFFF.toInt())
+                val freshness = freshness(last, app.repo.error.value, now)
+                val color = valueColor(last, freshness, prefs.low, prefs.high)
+                views.setTextViewText(R.id.widget_value, last.mmol.fmt())
+                views.setTextColor(R.id.widget_value, color)
+                views.setTextViewText(R.id.widget_arrow, last.arrow)
+                views.setTextColor(R.id.widget_arrow, color)
+                views.setTextViewText(R.id.widget_time, ageText(last, freshness, now))
+                views.setTextColor(R.id.widget_time, if (freshness == Freshness.FRESH) 0xE6FFFFFF.toInt() else ChartPainter.LOW_COLOR)
             }
 
             val options = manager.getAppWidgetOptions(id)
@@ -89,12 +111,7 @@ class GlucoseWidget : AppWidgetProvider() {
                 views.setImageViewBitmap(R.id.widget_chart, chart(readings, now - WINDOW_MS, now, prefs.low, prefs.high, w, h, density))
             }
 
-            val open = PendingIntent.getActivity(
-                ctx, 0,
-                Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-            )
-            views.setOnClickPendingIntent(R.id.widget_root, open)
+            views.setOnClickPendingIntent(R.id.widget_root, openAppIntent(ctx))
 
             // Профиль показываем, только если их несколько; нажатие — следующий профиль
             if (prefs.profiles().size > 1) {
@@ -106,8 +123,6 @@ class GlucoseWidget : AppWidgetProvider() {
             }
             manager.updateAppWidget(id, views)
         }
-
-        private fun color(mmol: Double, low: Double, high: Double) = ChartPainter.levelColor(mmol, low, high)
 
         private fun chart(
             readings: List<Reading>, start: Long, end: Long, low: Double, high: Double,

@@ -59,7 +59,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import ru.okornilov.glucose.app
+import ru.okornilov.glucose.data.Freshness
 import ru.okornilov.glucose.data.Reading
+import ru.okornilov.glucose.data.freshness
 import ru.okornilov.glucose.data.ago
 import ru.okornilov.glucose.data.fmt
 import ru.okornilov.glucose.data.hhmm
@@ -120,7 +122,7 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     // (или крупный шрифт в системе) — обычная прокрутка с графиком фиксированной высоты.
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val fits = maxHeight >= 560.dp
-        val halfScreen = LocalConfiguration.current.screenHeightDp.dp / 2
+        val thirdScreen = LocalConfiguration.current.screenHeightDp.dp / 3
         Column(
             Modifier
                 .fillMaxSize()
@@ -219,9 +221,9 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
                 readings, start, end, low, high,
                 Modifier
                     .fillMaxWidth()
-                    // Не выше половины экрана; если места меньше — сжимается
+                    // Не выше трети экрана; если места меньше — сжимается
                     .then(if (fits) Modifier.weight(1f, fill = false) else Modifier)
-                    .height(if (fits) halfScreen else 240.dp),
+                    .height(if (fits) thirdScreen else 240.dp),
             )
 
             DayStats(readings, low, high)
@@ -229,38 +231,53 @@ fun HomeScreen(onOpenSettings: () -> Unit) {
     }
 }
 
-/** Значение считается устаревшим, если запрос к серверу не удался или замеру больше стольких минут. */
-private const val FRESH_MINUTES = 5
-
 /** Текущее значение: крупно слева, время замера справа. Устаревшее значение выделено рамкой и приглушено. */
 @Composable
 private fun CurrentCard(last: Reading?, error: String?, now: Long, low: Double, high: Double) {
     val prefs = LocalContext.current.app.prefs
     val colors = MaterialTheme.colorScheme
     val ageMinutes = last?.let { (now - it.ts) / 60_000 }
-    val stale = last != null && (error != null || ageMinutes!! >= FRESH_MINUTES)
+    val freshness = freshness(last, error, now)
+    val stale = last != null && freshness != Freshness.FRESH
+    val notes = buildList {
+        error?.let { add("Ошибка связи: $it") }
+        if (freshness == Freshness.NO_NEW_DATA && last != null) {
+            add("LibreView отвечает, но новых замеров нет — проверьте сенсор и телефон с LibreLink")
+        }
+        if (!prefs.monitoring) add("Фоновый мониторинг выключен — уведомлений не будет")
+        if (prefs.muted(now)) add("🔕 Тишина до ${hhmm(prefs.muteUntil)}")
+    }
+    // Фон и рамка — только когда есть о чём предупредить; в обычном состоянии блок прозрачный
+    val container = when {
+        stale -> colors.errorContainer.copy(alpha = 0.25f)
+        last == null || notes.isNotEmpty() -> CardDefaults.cardColors().containerColor
+        else -> Color.Transparent
+    }
     Card(
         Modifier.fillMaxWidth(),
         border = if (stale) BorderStroke(2.dp, colors.error) else null,
-        colors = if (stale) CardDefaults.cardColors(containerColor = colors.errorContainer.copy(alpha = 0.25f)) else CardDefaults.cardColors(),
+        colors = CardDefaults.cardColors(containerColor = container),
     ) {
         if (stale) {
             Text(
-                "⚠ Нет свежих данных · последний замер в ${hhmm(last!!.ts)} ($ageMinutes мин назад)",
+                when (freshness) {
+                    Freshness.NO_SERVER -> "⚠ Нет связи с сервером LibreView · показан замер $ageMinutes мин назад"
+                    else -> "⚠ На сервере нет новых данных · последний замер $ageMinutes мин назад"
+                },
                 Modifier.padding(start = 18.dp, end = 18.dp, top = 10.dp),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
                 color = colors.error,
             )
         }
-        Row(Modifier.padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(horizontal = 18.dp, vertical = 22.dp), verticalAlignment = Alignment.CenterVertically) {
             if (last == null) {
                 Text("Нет данных", Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
             } else {
                 val level = levelColor(last.mmol, low, high)
                 val color = if (stale) level.copy(alpha = 0.45f) else level
-                Text(last.mmol.fmt(), fontSize = 52.sp, fontWeight = FontWeight.Bold, color = color)
-                Text(" ${last.arrow}", fontSize = 36.sp, color = color)
+                Text(last.mmol.fmt(), fontSize = 64.sp, fontWeight = FontWeight.Bold, color = color)
+                Text(" ${last.arrow}", fontSize = 44.sp, color = color)
                 Spacer(Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.End) {
                     Text("ммоль/л", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
@@ -268,11 +285,6 @@ private fun CurrentCard(last: Reading?, error: String?, now: Long, low: Double, 
                     Text(ago(last.ts, now), style = MaterialTheme.typography.labelSmall, color = if (stale) colors.error else colors.onSurfaceVariant)
                 }
             }
-        }
-        val notes = buildList {
-            error?.let { add("Ошибка: $it") }
-            if (!prefs.monitoring) add("Фоновый мониторинг выключен — уведомлений не будет")
-            if (prefs.muted(now)) add("🔕 Тишина до ${hhmm(prefs.muteUntil)}")
         }
         if (notes.isNotEmpty()) {
             Text(

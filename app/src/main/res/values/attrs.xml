@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Атрибуты виджетов One UI (как у погоды Samsung): по ним экран блокировки отбирает виджеты.
+         Система читает их по имени из пространства res-auto. -->
+    <attr name="targetHost" format="integer" />
+    <attr name="widgetSize" format="integer" />
+    <attr name="widgetStyle" format="integer" />
+    <attr name="allowMultipleSizes" format="boolean" />
+    <attr name="initialLayoutTiny" format="reference" />
+    <attr name="previewLayoutTiny" format="reference" />
+</resources>
