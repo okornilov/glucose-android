@@ -266,19 +266,20 @@ private fun CurrentCard(last: Reading?, error: String?, now: Long, low: Double, 
     // Фон по текущему значению: светло-красный, светло-зелёный или светло-жёлтый.
     // Устаревшее значение — прежнее выделение ошибкой, чтобы не путать с текущим уровнем.
     val tint = last?.let { zoneTint(it.mmol, low, high) }
-    // Рамка и цифры одного цвета зоны: в тёмной теме яркий, в светлой — насыщенный (яркий там не читается)
+    // Цифры в цвете зоны: в тёмной теме яркий, в светлой — насыщенный (яркий там не читается)
     val dark = colors.background.luminance() < 0.5f
-    val zoneBorder = last?.let { zoneStrong(it.mmol, low, high, dark) }
+    val zoneColor = last?.let { zoneStrong(it.mmol, low, high, dark) }
     val container = when {
         stale -> colors.errorContainer.copy(alpha = 0.25f)
-        tint != null -> tint.copy(alpha = 0.09f)
+        tint != null -> tint.copy(alpha = 0.14f)
         else -> CardDefaults.cardColors().containerColor
     }
     Card(
         Modifier.fillMaxWidth(),
+        // Зона видна по фону; рамка — только у предупреждения об устаревших данных
         border = when {
             stale -> BorderStroke(2.dp, colors.error)
-            zoneBorder != null -> BorderStroke(1.dp, zoneBorder)
+            tint != null -> null
             else -> BorderStroke(1.dp, colors.outlineVariant)
         },
         colors = CardDefaults.cardColors(containerColor = container),
@@ -300,7 +301,7 @@ private fun CurrentCard(last: Reading?, error: String?, now: Long, low: Double, 
                 Text("Нет данных", Modifier.weight(1f), style = MaterialTheme.typography.headlineMedium)
             } else {
                 // Цифры цветом рамки блока; устаревшее значение — приглушённое
-                val zone = zoneBorder ?: colors.onSurface
+                val zone = zoneColor ?: colors.onSurface
                 val fill = if (stale) zone.copy(alpha = 0.5f) else zone
                 Text(last.mmol.fmt(), fontSize = 64.sp, fontWeight = FontWeight.Black, color = fill)
                 Text(" ${last.arrow}", fontSize = 44.sp, fontWeight = FontWeight.Bold, color = fill)

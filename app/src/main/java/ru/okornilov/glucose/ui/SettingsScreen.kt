@@ -10,6 +10,13 @@ import android.os.Build
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.compose.ui.graphics.Color
+import ru.okornilov.glucose.alerts.AlertType
+import ru.okornilov.glucose.alerts.AlertTest
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.produceState
+import android.os.Looper
+import android.os.Handler
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
@@ -204,6 +211,10 @@ fun SettingsScreen() {
         AccountGroup()
 
         ProfilesSection()
+
+        AlertTestGroup(resumed)
+
+        if (prefs.monitoring) PollLogGroup()
 
         SettingsGroup("Сенсор и сводки", Icons.Default.DateRange) {
             SettingRow(
@@ -425,6 +436,20 @@ private fun AccountGroup() {
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Сохранить и проверить") }
                 checkResult?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                TextButton(
+                    onClick = {
+                        // Выход: мониторинг останавливаем, при следующем экране — снова вход
+                        MonitorService.stop(ctx)
+                        prefs.monitoring = false
+                        prefs.password = ""
+                        prefs.email = ""
+                        scope.launch {
+                            app.repo.reset()
+                            prefs.onboarded = false
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.End),
+                ) { Text("Выйти из аккаунта", color = MaterialTheme.colorScheme.error) }
             }
         }
     }
@@ -515,4 +540,112 @@ private fun SummaryTimeDialog(minuteOfDay: Int, onDismiss: () -> Unit, onConfirm
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
     )
+}
+
+/** Проверка тревог: что может помешать звуку и тестовое уведомление каждого типа. */
+@Composable
+private fun AlertTestGroup(resumed: Int) {
+    val ctx = LocalContext.current
+    var delayed by rememberSaveable { mutableStateOf(false) }
+    var scheduled by remember { mutableStateOf<String?>(null) }
+    val problems = remember(resumed, scheduled) { AlertTest.problems(ctx) }
+
+    SettingsGroup("Проверка тревог", Icons.Default.Warning) {
+        if (problems.isEmpty()) {
+            SettingRow(
+                "Мешающих настроек не найдено",
+                "Уведомления, каналы, «Не беспокоить» и громкость будильника в порядке",
+                leading = { Icon(Icons.Default.CheckCircle, contentDescription = null, tint = InRangeColor) },
+            )
+        } else {
+            problems.forEach { problem ->
+                SettingRow(problem, leading = { Icon(Icons.Default.Warning, contentDescription = null, tint = HighColor) })
+            }
+        }
+        GroupDivider()
+        SwitchSetting(
+            "Через 10 секунд",
+            delayed,
+            subtitle = "Успеть заблокировать экран и проверить, как тревога придёт на заблокированный телефон",
+            leading = {},
+        ) { delayed = it }
+        AlertTest.entries.forEach { test ->
+            SettingRow(
+                test.title,
+                if (scheduled == test.name) "Придёт через 10 секунд…" else null,
+                leading = { Dot(if (test.type == AlertType.HIGH) HighColor else if (test.type == AlertType.STALE) Color(0xFF9E9E9E) else LowColor) },
+            ) {
+                TextButton(onClick = {
+                    val appCtx = ctx.applicationContext
+                    if (delayed) {
+                        scheduled = test.name
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            Notifications.test(appCtx, test)
+                            scheduled = null
+                        }, 10_000)
+                    } else {
+                        Notifications.test(appCtx, test)
+                    }
+                }) { Text("Проверить") }
+            }
+        }
+        Text(
+            "Тест идёт по настройкам активного профиля и не влияет на настоящие тревоги. " +
+                "Громкий сигнал звучит до минуты — остановить кнопкой под уведомлением или смахиванием.",
+            Modifier.padding(start = 54.dp, end = 16.dp, bottom = 12.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Журнал фоновых опросов: последний опрос и задержки за сутки. */
+@Composable
+private fun PollLogGroup() {
+    val ctx = LocalContext.current
+    val log = ctx.app.pollLog
+    val now by produceState(System.currentTimeMillis()) {
+        while (true) {
+            delay(5_000)
+            value = System.currentTimeMillis()
+        }
+    }
+    val last = log.lastPollAt
+    val gaps = remember(now / 60_000) { log.gaps(now) }
+
+    SettingsGroup("Журнал опросов", Icons.Default.DateRange) {
+        val ago = if (last == 0L) null else (now - last) / 1000
+        SettingRow(
+            "Последний опрос",
+            when {
+                ago == null -> "Ещё не было"
+                ago < 90 -> "$ago с назад — фон работает"
+                else -> "${ago / 60} мин назад — опрос задерживается"
+            },
+            leading = {
+                Icon(
+                    if (ago != null && ago < 90) Icons.Default.CheckCircle else Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = if (ago != null && ago < 90) InRangeColor else HighColor,
+                )
+            },
+        )
+        GroupDivider()
+        if (gaps.isEmpty()) {
+            SettingRow("Задержек за сутки нет", "Опрос шёл каждую минуту", leading = {})
+        } else {
+            val worst = gaps.maxBy { it.minutes }
+            SettingRow(
+                "Задержки за сутки: ${gaps.size}",
+                "Самая долгая — ${worst.minutes} мин, до ${hhmm(worst.end)}. Задержка — больше 5 минут без опроса",
+                leading = { Icon(Icons.Default.Warning, contentDescription = null, tint = HighColor) },
+            )
+            Text(
+                gaps.takeLast(6).reversed().joinToString("\n") { "до ${hhmm(it.end)} — ${it.minutes} мин" },
+                Modifier.padding(start = 54.dp, end = 16.dp, bottom = 12.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }

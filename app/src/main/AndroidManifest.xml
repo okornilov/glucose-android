@@ -17,6 +17,12 @@
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
+    <!-- Кнопка «Открыть LibreLinkUp» на экране входа: на Android 11+ чужие пакеты видны только так -->
+    <queries>
+        <package android:name="org.newyu.librelinkup.ru" />
+        <package android:name="org.nativescript.LibreLinkUp" />
+    </queries>
+
     <application
         android:name=".App"
         android:allowBackup="false"
@@ -55,12 +61,17 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
-        <receiver
-            android:name=".alerts.AlertActionReceiver"
-            android:exported="false" />
+        <!-- «Отложить…» из уведомления: прозрачное окно с выбором, не попадает в недавние -->
+        <activity
+            android:name=".alerts.SnoozeActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <receiver
-            android:name=".profile.ProfileReceiver"
+            android:name=".alerts.AlertActionReceiver"
             android:exported="false" />
 
         <service
@@ -99,6 +110,26 @@
                 android:name="samsung.appwidget.monotone.info"
                 android:resource="@xml/glucose_lock_widget_oneui" />
         </receiver>
+
+        <!--
+            Android Auto. Категорий «здоровье» нет — используется IOT. Приложение не из Google Play,
+            поэтому в Android Auto нужно включить «Неизвестные источники» (настройки разработчика).
+        -->
+        <service
+            android:name=".car.GlucoseCarAppService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.IOT" />
+            </intent-filter>
+        </service>
+
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+        <meta-data
+            android:name="androidx.car.app.minCarApiLevel"
+            android:value="1" />
 
         <receiver
             android:name=".service.BootReceiver"

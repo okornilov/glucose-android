@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.okornilov.glucose.alerts.AlarmPlayer
 import ru.okornilov.glucose.app
 import ru.okornilov.glucose.service.MonitorService
@@ -45,7 +46,16 @@ class MainActivity : ComponentActivity() {
         // Сервис мог быть остановлен системой или принудительной остановкой — поднимаем снова
         if (app.prefs.monitoring) MonitorService.start(this)
         val openSettings = intent.getBooleanExtra(EXTRA_OPEN_SETTINGS, false)
-        setContent { GlucoseTheme { MainScreen(openSettings) } }
+        setContent {
+            GlucoseTheme {
+                app.prefs.changes.collectAsStateWithLifecycle().value
+                if (app.prefs.onboarded) {
+                    MainScreen(openSettings)
+                } else {
+                    Scaffold { padding -> Box(Modifier.padding(padding)) { OnboardingScreen(onDone = {}) } }
+                }
+            }
+        }
     }
 
     override fun onResume() {

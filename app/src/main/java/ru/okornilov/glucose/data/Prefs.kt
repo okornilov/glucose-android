@@ -29,6 +29,14 @@ class Prefs(context: Context) {
 
     var muteUntil by sp.longPref("mute_until", 0L, bump)
 
+    /** Первый запуск пройден. У тех, кто уже входил до появления экрана входа, — сразу пройден. */
+    var onboarded: Boolean
+        get() = sp.getBoolean("onboarded", email.isNotBlank())
+        set(value) {
+            sp.edit().putBoolean("onboarded", value).apply()
+            bump()
+        }
+
     /** Когда запущен текущий сенсор (epoch millis), 0 — неизвестно. Обновляется при каждом опросе. */
     var sensorStart by sp.longPref("sensor_start", 0L)
 

@@ -28,7 +28,8 @@ class AlertEngine(private val context: Context, private val prefs: Prefs) {
     private var staleSilenced by st.boolPref("stale_silenced", false) // отключено до появления данных
     private var staleSnoozeUntil by st.longPref("stale_snooze_until", 0L)
 
-    private fun isActive(kind: String) = when (kind) {
+    /** Идёт ли сейчас событие kind (для кнопки «Отложить» в Android Auto). */
+    fun isActive(kind: String) = when (kind) {
         KIND_LEVEL -> level != OK
         KIND_PREDICT -> predictActive
         else -> staleAlertAt != 0L

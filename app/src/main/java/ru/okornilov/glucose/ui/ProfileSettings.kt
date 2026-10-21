@@ -129,7 +129,7 @@ fun ProfilesSection() {
         }
     }
     Text(
-        "Переключать профили быстро: на главном экране, кнопками в шторке и плиткой в быстрых настройках.",
+        "Переключать профили быстро: на главном экране и плиткой в быстрых настройках.",
         Modifier.padding(horizontal = 6.dp),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,

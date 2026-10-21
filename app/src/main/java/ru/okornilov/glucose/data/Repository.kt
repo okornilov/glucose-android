@@ -69,6 +69,20 @@ class Repository(
         }
     }
 
+    /** Выход из аккаунта: забыть замеры и сенсор, чтобы данные другого аккаунта не смешались с этими. */
+    suspend fun reset() = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            db.deleteBefore(Long.MAX_VALUE)
+            prefs.sensorStart = 0L
+            client = null
+            clientKey = null
+            _last.value = null
+            _error.value = null
+            _dataVersion.update { it + 1 }
+            onRefreshed()
+        }
+    }
+
     companion object {
         private const val KEEP_DAYS = 90
         private const val RECENT_MS = 20 * 60_000L

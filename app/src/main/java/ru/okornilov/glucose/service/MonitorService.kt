@@ -52,6 +52,7 @@ class MonitorService : Service() {
         val wakeLock = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "glucose:poll")
             .apply { acquire(60_000L) }
+        app.pollLog.onPoll()
         job = scope.launch {
             try {
                 app.repo.refresh()
@@ -82,6 +83,7 @@ class MonitorService : Service() {
         }
 
         fun stop(ctx: Context) {
+            ctx.app.pollLog.reset()
             cancelAlarm(ctx)
             ctx.stopService(Intent(ctx, MonitorService::class.java))
         }

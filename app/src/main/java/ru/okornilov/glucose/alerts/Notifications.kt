@@ -27,7 +27,6 @@ import ru.okornilov.glucose.data.ago
 import ru.okornilov.glucose.data.describe
 import ru.okornilov.glucose.data.fmt
 import ru.okornilov.glucose.data.freshness
-import ru.okornilov.glucose.profile.ProfileReceiver
 import ru.okornilov.glucose.ui.MainActivity
 
 object Notifications {
@@ -35,15 +34,15 @@ object Notifications {
     const val CH_MONITOR_QUIET = "monitor_quiet"
     private const val CH_SENSOR = "sensor"
     private const val CH_SUMMARY = "summary"
+    private const val CH_WATCHDOG = "watchdog"
 
     const val ID_ONGOING = 1
-    private const val ID_LEVEL = 10
-    private const val ID_STALE = 11
-    private const val ID_RECOVERY = 12
-    private const val ID_RESUMED = 13
-    private const val ID_PREDICT = 14
+    /** Все уведомления-события (сахар, прогноз, нет данных, «в норме») — под одним id: новое заменяет прежнее. */
+    private const val ID_ALERT = 10
     private const val ID_SENSOR = 15
     private const val ID_SUMMARY = 16
+    private const val ID_WATCHDOG = 17
+    private const val ID_TEST = 18
 
     /** Канал типа уведомления в активном профиле. */
     fun channelId(ctx: Context, type: AlertType): String = channelId(ctx.app.prefs.active, type)
@@ -68,6 +67,7 @@ object Notifications {
             NotificationChannel(CH_MONITOR_QUIET, "Фоновая работа", NotificationManager.IMPORTANCE_MIN).apply {
                 setShowBadge(false)
             },
+            NotificationChannel(CH_WATCHDOG, "Мониторинг остановлен", NotificationManager.IMPORTANCE_HIGH),
             NotificationChannel(CH_SENSOR, "Замена сенсора", NotificationManager.IMPORTANCE_DEFAULT),
             NotificationChannel(CH_SUMMARY, "Утренняя сводка", NotificationManager.IMPORTANCE_DEFAULT).apply {
                 setShowBadge(false)
@@ -180,7 +180,8 @@ object Notifications {
         val prefs = ctx.app.prefs
         val profile = prefs.active
         if (last != null) {
-            b.setSmallIcon(Icon.createWithBitmap(valueBitmap(last.mmol.fmt())))
+            val stale = freshness(last, error) != Freshness.FRESH
+            b.setSmallIcon(Icon.createWithBitmap(valueBitmap(last.mmol.fmt(), last.trend, stale)))
                 .setContentTitle("${last.mmol.fmt()} ммоль/л ${last.arrow}")
                 .setContentText(
                     when (freshness(last, error)) {
@@ -194,14 +195,14 @@ object Notifications {
                 .setContentTitle("Нет данных")
                 .setContentText(error ?: "Ожидание данных LibreView · профиль «${profile.name}»")
         }
-        if (last != null && prefs.liveUpdate) promote(b, "${last.mmol.fmt()}${last.arrow}")
-        // Быстрое переключение: кнопки остальных профилей (в уведомлении помещается три)
-        prefs.profiles().filter { it.id != profile.id }.take(3).forEachIndexed { i, p ->
-            b.addAction(
-                Notification.Action.Builder(
-                    Icon.createWithResource(ctx, R.drawable.ic_stat), p.name, ProfileReceiver.activateIntent(ctx, p.id, i)
-                ).build()
-            )
+        if (last != null && prefs.liveUpdate) {
+            // Устаревшее значение в капсуле — зачёркнутым (комбинируемый штрих U+0336 после каждого символа)
+            val chip = if (freshness(last, error) == Freshness.FRESH) {
+                "${last.mmol.fmt()}${last.arrow}"
+            } else {
+                last.mmol.fmt().map { "$it\u0336" }.joinToString("")
+            }
+            promote(b, chip)
         }
         return b.build()
     }
@@ -220,13 +221,14 @@ object Notifications {
             .setCategory(Notification.CATEGORY_ALARM)
             .setContentIntent(openApp(ctx))
             .setDeleteIntent(stopSoundIntent(ctx))
-            .setOnlyAlertOnce(escalate)
+            // Не звучать повторно, только если на экране уже это же уведомление и звучит громкий сигнал
+            .setOnlyAlertOnce(escalate && shownKind(ctx) == AlertEngine.KIND_LEVEL)
             .setAutoCancel(true)
+            .addAction(alertAction(ctx, AlertEngine.KIND_LEVEL, 15))
             .addAction(alertAction(ctx, AlertEngine.KIND_LEVEL, 30))
-            .addAction(alertAction(ctx, AlertEngine.KIND_LEVEL, 60))
-            .addAction(alertAction(ctx, AlertEngine.KIND_LEVEL, 0))
+            .addAction(snoozeMoreAction(ctx, AlertEngine.KIND_LEVEL))
             .build()
-        notify(ctx, ID_LEVEL, n)
+        notifyAlert(ctx, AlertEngine.KIND_LEVEL, n)
         if (escalate) {
             val profile = ctx.app.prefs.active
             AlarmPlayer.start(ctx, soundUri(profile, AlertType.LOW), vibration(profile, AlertType.LOW) != Vibration.OFF)
@@ -257,7 +259,7 @@ object Notifications {
                 ).build()
             )
             .build()
-        notify(ctx, ID_PREDICT, n)
+        notifyAlert(ctx, AlertEngine.KIND_PREDICT, n)
     }
 
     fun stale(ctx: Context, minutes: Long, last: Reading?, error: String?) {
@@ -272,11 +274,11 @@ object Notifications {
             .setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(openApp(ctx))
             .setAutoCancel(true)
+            .addAction(alertAction(ctx, AlertEngine.KIND_STALE, 15))
             .addAction(alertAction(ctx, AlertEngine.KIND_STALE, 30))
-            .addAction(alertAction(ctx, AlertEngine.KIND_STALE, 60))
-            .addAction(alertAction(ctx, AlertEngine.KIND_STALE, 0))
+            .addAction(snoozeMoreAction(ctx, AlertEngine.KIND_STALE))
             .build()
-        notify(ctx, ID_STALE, n)
+        notifyAlert(ctx, AlertEngine.KIND_STALE, n)
     }
 
     /** Напоминание о замене сенсора. */
@@ -289,6 +291,51 @@ object Notifications {
             .setAutoCancel(true)
             .build()
         notify(ctx, ID_SENSOR, n)
+    }
+
+    /** Тестовая тревога: настоящий канал и мелодия активного профиля, но отдельное уведомление — текущие тревоги не трогает. */
+    fun test(ctx: Context, test: AlertTest) {
+        val profile = ctx.app.prefs.active
+        val text = if (test.loud) {
+            "Так звучит громкий сигнал при низком сахаре без реакции (профиль «${profile.name}»)"
+        } else {
+            "Так будет выглядеть и звучать это уведомление в профиле «${profile.name}»"
+        }
+        val n = Notification.Builder(ctx, channelId(profile, test.type))
+            .setSmallIcon(R.drawable.ic_stat)
+            .setContentTitle("🧪 Тест: ${test.title}")
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setCategory(Notification.CATEGORY_ALARM)
+            .setContentIntent(openApp(ctx))
+            .setDeleteIntent(stopSoundIntent(ctx))
+            .setAutoCancel(true)
+            .addAction(Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_stat), "Остановить", stopSoundIntent(ctx)).build())
+            .build()
+        notify(ctx, ID_TEST, n)
+        if (test.loud) AlarmPlayer.start(ctx, soundUri(profile, AlertType.LOW), vibration(profile, AlertType.LOW) != Vibration.OFF)
+    }
+
+    fun cancelTest(ctx: Context) {
+        ctx.getSystemService(NotificationManager::class.java).cancel(ID_TEST)
+    }
+
+    /** Сторож: опроса не было minutes минут. restarted — удалось ли перезапустить службу. */
+    fun watchdog(ctx: Context, minutes: Long, restarted: Boolean) {
+        val text = if (restarted) {
+            "Мониторинг перезапущен. Пока он стоял, тревоги не приходили. Проверьте работу в фоне без ограничений батареи"
+        } else {
+            "Система не дала перезапустить мониторинг — откройте приложение. Пока он стоит, тревоги не приходят"
+        }
+        val n = Notification.Builder(ctx, CH_WATCHDOG)
+            .setSmallIcon(R.drawable.ic_stat)
+            .setContentTitle("⚠️ Мониторинг стоял $minutes мин")
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setContentIntent(openApp(ctx))
+            .setAutoCancel(true)
+            .build()
+        notify(ctx, ID_WATCHDOG, n)
     }
 
     /** Утренняя сводка за ночь. */
@@ -313,16 +360,26 @@ object Notifications {
             .setContentIntent(openApp(ctx))
             .setAutoCancel(true)
             .build()
-        notify(ctx, if (type == AlertType.RESUMED) ID_RESUMED else ID_RECOVERY, n)
+        notifyAlert(ctx, KIND_INFO, n)
     }
 
+    /** Какое событие сейчас в уведомлении — чтобы снимать только своё, а не заменившее его. */
+    private const val KIND_INFO = "info"
+
+    private fun state(ctx: Context) = ctx.getSharedPreferences("alert_state", Context.MODE_PRIVATE)
+
+    private fun shownKind(ctx: Context): String? = state(ctx).getString("shown_kind", null)
+
+    private fun notifyAlert(ctx: Context, kind: String, n: Notification) {
+        state(ctx).edit().putString("shown_kind", kind).apply()
+        notify(ctx, ID_ALERT, n)
+    }
+
+    /** Убрать уведомление события kind — если его уже не заменило другое. */
     fun cancel(ctx: Context, kind: String) {
-        val id = when (kind) {
-            AlertEngine.KIND_LEVEL -> ID_LEVEL
-            AlertEngine.KIND_PREDICT -> ID_PREDICT
-            else -> ID_STALE
-        }
-        ctx.getSystemService(NotificationManager::class.java).cancel(id)
+        if (shownKind(ctx) != kind) return
+        state(ctx).edit().remove("shown_kind").apply()
+        ctx.getSystemService(NotificationManager::class.java).cancel(ID_ALERT)
     }
 
     fun notify(ctx: Context, id: Int, n: Notification) {
@@ -337,8 +394,8 @@ object Notifications {
     /** minutes = 0 — «до нормализации» / «до появления данных», иначе отложить на minutes. */
     private fun alertAction(ctx: Context, kind: String, minutes: Int): Notification.Action {
         val title = when {
-            minutes == 30 -> "🔕 30 мин"
             minutes == 60 -> "🔕 1 час"
+            minutes > 0 -> "🔕 $minutes мин"
             kind == AlertEngine.KIND_LEVEL -> "🔇 До нормализации"
             kind == AlertEngine.KIND_PREDICT -> "👌 Понятно"
             else -> "🔇 До появления данных"
@@ -358,6 +415,20 @@ object Notifications {
         return Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_stat), title, pi).build()
     }
 
+    /**
+     * Кнопок под уведомлением помещается три — остальные варианты отсрочки в маленьком окне поверх экрана.
+     */
+    private fun snoozeMoreAction(ctx: Context, kind: String): Notification.Action {
+        val intent = Intent(ctx, SnoozeActivity::class.java)
+            .putExtra(AlertActionReceiver.EXTRA_KIND, kind)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        val pi = PendingIntent.getActivity(
+            ctx, if (kind == AlertEngine.KIND_LEVEL) 150 else 250, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        return Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_stat), "Отложить…", pi).build()
+    }
+
     /** Смахнули уведомление о сахаре — выключить громкий сигнал (сама тревога при этом продолжается). */
     private fun stopSoundIntent(ctx: Context): PendingIntent = PendingIntent.getBroadcast(
         ctx, 400,
@@ -371,18 +442,71 @@ object Notifications {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-    private fun valueBitmap(text: String): Bitmap {
+    /**
+     * Значок строки состояния. Система перекрашивает его в один цвет, поэтому тренд показан формой:
+     * при росте — черта над цифрами, при падении — под ними; быстрое изменение — две черты.
+     * Ровный сахар — только цифры, устаревшее значение — перечёркнуто.
+     */
+    private fun valueBitmap(value: String, trend: Int?, stale: Boolean): Bitmap {
         val size = 96
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            textAlign = Paint.Align.CENTER
-            textSize = size * 0.75f
+        val canvas = Canvas(bmp)
+        val lines = if (stale) 0 else when (trend) {
+            5, 1 -> 2 // ↑ ↓
+            4, 2 -> 1 // ↗ ↘
+            else -> 0
         }
-        while (paint.measureText(text) > size && paint.textSize > 10f) paint.textSize -= 2f
-        val y = size / 2f - (paint.descent() + paint.ascent()) / 2
-        Canvas(bmp).drawText(text, size / 2f, y, paint)
+        val rising = trend == 4 || trend == 5
+        val bar = size * 0.09f
+        val gap = size * 0.06f
+        // Место под черты отнимаем у высоты цифр; без черт цифры — почти во весь значок
+        val reserved = lines * (bar + gap)
+        val maxCap = (if (lines == 0) size * 0.98f else size * 0.92f) - reserved
+        val digits = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
+            textSize = size * 1.6f
+            letterSpacing = -0.05f
+        }
+        // Точку рисуем сами — узкой и вплотную: символ «.» в шрифте с полями отнимает ширину у цифр
+        val parts = value.split('.', limit = 2)
+        val left = parts[0]
+        val right = parts.getOrElse(1) { "" }
+        val hasDot = right.isNotEmpty()
+        val bounds = android.graphics.Rect()
+        fun dotSize() = digits.textSize * 0.13f
+        fun dotSlot() = if (hasDot) dotSize() + digits.textSize * 0.06f else 0f
+        fun textWidth() = digits.measureText(left) + dotSlot() + digits.measureText(right)
+        fun cap(): Int {
+            digits.getTextBounds(left + right, 0, left.length + right.length, bounds)
+            return bounds.height()
+        }
+        while ((textWidth() > size || cap() > maxCap) && digits.textSize > 10f) digits.textSize -= 1f
+        val textW = textWidth()
+        val x = (size - textW) / 2
+        val blockH = bounds.height() + reserved
+        val blockTop = (size - blockH) / 2
+        // Цифры — под чертами при росте, над чертами при падении
+        val textTop = if (rising) blockTop + reserved else blockTop
+        val y = textTop - bounds.top
+        canvas.drawText(left, x, y, digits)
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+        if (hasDot) {
+            val dx = x + digits.measureText(left) + digits.textSize * 0.03f
+            val d = dotSize()
+            canvas.drawRect(dx, y - d, dx + d, y, fill)
+            canvas.drawText(right, dx + d + digits.textSize * 0.03f, y, digits)
+        }
+
+        for (k in 0 until lines) {
+            val top = if (rising) blockTop + k * (bar + gap) else textTop + bounds.height() + gap + k * (bar + gap)
+            canvas.drawRoundRect(x, top, x + textW, top + bar, bar / 2, bar / 2, fill)
+        }
+        if (stale) {
+            val mid = textTop + bounds.height() / 2f
+            val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; strokeWidth = size * 0.09f; strokeCap = Paint.Cap.ROUND }
+            canvas.drawLine(x - 2, mid, x + textW + 2, mid, stroke)
+        }
         return bmp
     }
 }

@@ -9,7 +9,11 @@ import ru.okornilov.glucose.app
 class AlertActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         AlarmPlayer.stop()
-        if (intent.action == ACTION_STOP_SOUND) return
+        if (intent.action == ACTION_STOP_SOUND) {
+            // «Остановить» под тестовой тревогой — убрать и само уведомление
+            Notifications.cancelTest(context)
+            return
+        }
         if (intent.action == ACTION_DISABLE_PREDICT) {
             // Выключить прогнозы в активном профиле; включить снова — в настройках профиля
             val prefs = context.app.prefs
