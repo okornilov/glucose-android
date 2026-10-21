@@ -18,11 +18,24 @@ android {
         versionName = "0.4.0"
     }
 
+    // Ключ релизов — вне репозитория: путь и пароли в ~/.gradle/gradle.properties (GLUCOSE_*).
+    // Без них (сборка из исходников на другом компьютере) release подписывается debug-ключом сборщика.
+    val releaseStore = providers.gradleProperty("GLUCOSE_STORE_FILE").orNull
+    signingConfigs {
+        if (releaseStore != null) {
+            create("release") {
+                storeFile = file(releaseStore)
+                storePassword = providers.gradleProperty("GLUCOSE_STORE_PASSWORD").get()
+                keyAlias = providers.gradleProperty("GLUCOSE_KEY_ALIAS").get()
+                keyPassword = providers.gradleProperty("GLUCOSE_KEY_PASSWORD").get()
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Приложение ставится вручную, без Google Play — подписываем debug-ключом
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 
