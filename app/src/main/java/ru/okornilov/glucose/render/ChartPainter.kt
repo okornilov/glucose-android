@@ -70,15 +70,19 @@ object ChartPainter {
                 canvas.drawText("$mark", area.left, yy + 4 * scale, text)
                 mark += 2
             }
+            // Линии и подписи — на ровных часах, даже если окно начинается не с начала часа (график «последние 3 часа»)
             val hours = ((end - start) / 3_600_000L).toInt().coerceAtLeast(1)
             val step = if (hours > 12) 3 else 1
-            for (h in 0..hours step step) {
-                val xx = left + h.toFloat() / hours * (right - left)
+            val zone = ZoneId.systemDefault()
+            var t = Instant.ofEpochMilli(start).atZone(zone).withMinute(0).withSecond(0).withNano(0)
+            if (t.toInstant().toEpochMilli() < start) t = t.plusHours(1)
+            while (t.hour % step != 0) t = t.plusHours(1)
+            while (t.toInstant().toEpochMilli() <= end) {
+                val xx = x(t.toInstant().toEpochMilli())
                 canvas.drawLine(xx, top, xx, bottom, grid)
-                if (h < hours) {
-                    val hour = Instant.ofEpochMilli(start + h * 3_600_000L).atZone(ZoneId.systemDefault()).hour
-                    canvas.drawText("%02d".format(hour), xx + 3 * scale, bottom + 15 * scale, text)
-                }
+                // Подпись — справа от линии, если помещается
+                if (xx + 18 * scale < right) canvas.drawText("%02d".format(t.hour), xx + 3 * scale, bottom + 15 * scale, text)
+                t = t.plusHours(step.toLong())
             }
         }
 

@@ -3,14 +3,13 @@ package ru.okornilov.glucose.car
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.RectF
-import android.text.SpannableString
-import android.text.Spanned
+import android.util.Log
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
 import androidx.car.app.model.Action
 import androidx.car.app.model.CarColor
 import androidx.car.app.model.CarIcon
-import androidx.car.app.model.ForegroundCarColorSpan
+import androidx.car.app.model.MessageTemplate
 import androidx.car.app.model.Pane
 import androidx.car.app.model.PaneTemplate
 import androidx.car.app.model.Row
@@ -22,6 +21,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import ru.okornilov.glucose.R
 import ru.okornilov.glucose.alerts.AlarmPlayer
 import ru.okornilov.glucose.alerts.AlertEngine
 import ru.okornilov.glucose.alerts.Notifications
@@ -67,7 +67,18 @@ class GlucoseScreen(carContext: CarContext) : Screen(carContext) {
         refreshing = lifecycleScope.launch { app.repo.refresh() }
     }
 
-    override fun onGetTemplate(): Template {
+    // Исключение здесь уронило бы весь процесс приложения вместе с фоновым мониторингом — ловим и показываем сообщение
+    override fun onGetTemplate(): Template = try {
+        buildTemplate()
+    } catch (e: Exception) {
+        Log.e("GlucoseScreen", "Не удалось построить экран Android Auto", e)
+        MessageTemplate.Builder("Не удалось показать данные: ${e.message ?: e.javaClass.simpleName}")
+            .setTitle("Сахар")
+            .setHeaderAction(Action.APP_ICON)
+            .build()
+    }
+
+    private fun buildTemplate(): Template {
         val prefs = app.prefs
         val now = System.currentTimeMillis()
         val last = app.repo.last.value
@@ -89,13 +100,22 @@ class GlucoseScreen(carContext: CarContext) : Screen(carContext) {
                 Zone.IN_RANGE -> "в норме"
                 Zone.HIGH -> "высокий"
             }
-            val title = colored("${last.mmol.fmt()} ммоль/л ${last.arrow}", if (fresh == Freshness.FRESH) carColor(zone) else CarColor.DEFAULT)
+            // Цветной текст в строках Android Auto запрещён — зона показана цветным кружком слева
+            val dot = CarIcon.Builder(IconCompat.createWithResource(carContext, R.drawable.ic_dot))
+                .setTint(if (fresh == Freshness.FRESH) carColor(zone) else CarColor.DEFAULT)
+                .build()
             val sub = when (fresh) {
                 Freshness.FRESH -> "Замер ${ago(last.ts, now)} · $status"
                 Freshness.NO_SERVER -> "⚠ Нет связи с сервером · замер ${ago(last.ts, now)}"
                 Freshness.NO_NEW_DATA -> "⚠ Нет новых данных · замер ${ago(last.ts, now)}"
             }
-            pane.addRow(Row.Builder().setTitle(title).addText(sub).build())
+            pane.addRow(
+                Row.Builder()
+                    .setTitle("${last.mmol.fmt()} ммоль/л ${last.arrow}")
+                    .addText(sub)
+                    .setImage(dot, Row.IMAGE_TYPE_SMALL)
+                    .build()
+            )
 
             val recent = app.db.between(now - 20 * 60_000L, now + 60_000L)
             forecast(recent, now, prefs.predictMinutes)?.let { f ->
@@ -124,11 +144,13 @@ class GlucoseScreen(carContext: CarContext) : Screen(carContext) {
         // График за 3 часа — картинкой (на хостах с Car API 4+, на старых просто без неё)
         if (carContext.carAppApiLevel >= 4) {
             val window = 3 * 3600_000L
-            val bmp = Bitmap.createBitmap(720, 360, Bitmap.Config.ARGB_8888)
+            // Android Auto обрезает картинку панели по бокам до квадрата —
+            // рисуем сразу квадратную и крупным шрифтом: её сильно уменьшают
+            val bmp = Bitmap.createBitmap(560, 560, Bitmap.Config.ARGB_8888)
             ChartPainter.draw(
-                Canvas(bmp), RectF(8f, 8f, 712f, 352f),
+                Canvas(bmp), RectF(6f, 10f, 550f, 552f),
                 app.db.between(now - window, now + 60_000L), now - window, now, prefs.low, prefs.high,
-                scale = 2f, labels = true,
+                scale = 3.2f, labels = true,
             )
             pane.setImage(CarIcon.Builder(IconCompat.createWithBitmap(bmp)).build())
         }
@@ -164,12 +186,5 @@ class GlucoseScreen(carContext: CarContext) : Screen(carContext) {
         Zone.LOW -> CarColor.RED
         Zone.IN_RANGE -> CarColor.GREEN
         Zone.HIGH -> CarColor.YELLOW
-    }
-
-    private fun colored(text: String, color: CarColor): CharSequence {
-        if (color == CarColor.DEFAULT) return text
-        return SpannableString(text).apply {
-            setSpan(ForegroundCarColorSpan.create(color), 0, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        }
     }
 }
