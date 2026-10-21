@@ -29,6 +29,8 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocationOn
@@ -335,9 +337,47 @@ fun SettingsScreen() {
                 }
             }
         }
+        AboutGroup()
+
         Spacer(Modifier.height(8.dp))
     }
 }
+
+/** О приложении: версия, политика конфиденциальности, исходники и медицинская оговорка. */
+@Composable
+private fun AboutGroup() {
+    val ctx = LocalContext.current
+    val version = remember {
+        ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName.orEmpty()
+    }
+    fun open(url: String) = ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+
+    SettingsGroup("О приложении", Icons.Default.Info) {
+        SettingRow(
+            "Сахар $version",
+            "Не медицинское изделие. Использует неофициальный API LibreView, который может перестать работать. " +
+                "Не связано с Abbott.",
+            leading = { Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+        )
+        GroupDivider()
+        SettingRow(
+            "Политика конфиденциальности",
+            "Данные хранятся только на телефоне и уходят только в LibreView",
+            leading = { Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+            onClick = { open(PRIVACY_URL) },
+        )
+        GroupDivider()
+        SettingRow(
+            "Исходный код и лицензия",
+            "GitHub, лицензия MIT",
+            leading = { Icon(Icons.Default.Share, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+            onClick = { open(SOURCE_URL) },
+        )
+    }
+}
+
+private const val PRIVACY_URL = "https://okornilov.github.io/glucose-android/privacy"
+private const val SOURCE_URL = "https://github.com/okornilov/glucose-android"
 
 /** Учётная запись LibreLinkUp: свёрнута в строку, по нажатию раскрывается форма входа. */
 @Composable

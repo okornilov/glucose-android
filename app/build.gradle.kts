@@ -14,8 +14,8 @@ android {
         applicationId = "ru.okornilov.glucose"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "0.5.0"
     }
 
     // Ключ релизов — вне репозитория: путь и пароли в ~/.gradle/gradle.properties (GLUCOSE_*).
